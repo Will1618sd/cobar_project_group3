@@ -1,5 +1,5 @@
 import numpy as np
-from cobar_miniproject.base_controller import BaseController
+from cobar_miniproject.base_controller import Action, BaseController, Observation
 from .utils import get_cpg, step_cpg
 
 
@@ -16,7 +16,7 @@ class Controller(BaseController):
         self.cpg_network = get_cpg(timestep=timestep, seed=seed)
         self.preprogrammed_steps = PreprogrammedSteps()
 
-    def get_actions(self, obs):
+    def get_actions(self, obs: Observation) -> Action:
         joint_angles, adhesion = step_cpg(
             cpg_network=self.cpg_network,
             preprogrammed_steps=self.preprogrammed_steps,
@@ -28,7 +28,7 @@ class Controller(BaseController):
             "adhesion": adhesion,
         }
 
-    def done_level(self, obs):
+    def done_level(self, obs: Observation):
         return self.quit
 
     def reset(self, **kwargs):

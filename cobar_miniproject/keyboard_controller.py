@@ -1,9 +1,8 @@
 import numpy as np
 from pynput import keyboard
 from flygym.examples.locomotion import PreprogrammedSteps, CPGNetwork
-import threading
 
-from cobar_miniproject.base_controller import BaseController
+from cobar_miniproject.base_controller import Action, BaseController
 
 # Initialize CPG network
 intrinsic_freqs = np.ones(6) * 12 * 1.5
@@ -71,9 +70,6 @@ class KeyBoardController(BaseController):
         self.gain_right = 0.0
         self.gain_left = 0.0
 
-        # Shared lists to store key presses
-        self.lock = threading.Lock()
-
         print("Starting key listener")
         # Start the keyboard listener thread
         self.listener = keyboard.Listener(
@@ -86,17 +82,13 @@ class KeyBoardController(BaseController):
     def on_press(self, key):
         # check if key is w, a, s, d
         if key == keyboard.KeyCode.from_char("w"):
-            with self.lock:
-                self.forward = 1
+            self.forward = 1
         if key == keyboard.KeyCode.from_char("a"):
-            with self.lock:
-                self.turning = 1
+            self.turning = 1
         if key == keyboard.KeyCode.from_char("s"):
-            with self.lock:
-                self.forward = -1
+            self.forward = -1
         if key == keyboard.KeyCode.from_char("d"):
-            with self.lock:
-                self.turning = -1
+            self.turning = -1
         if key == keyboard.Key.esc:
             self.listener.stop()
             self.quit = True
@@ -104,17 +96,13 @@ class KeyBoardController(BaseController):
     def on_release(self, key):
         # check if key is w, a, s, d
         if key == keyboard.KeyCode.from_char("w"):
-            with self.lock:
-                self.forward = 0
+            self.forward = 0
         if key == keyboard.KeyCode.from_char("a"):
-            with self.lock:
-                self.turning = 0
+            self.turning = 0
         if key == keyboard.KeyCode.from_char("s"):
-            with self.lock:
-                self.forward = 0
+            self.forward = 0
         if key == keyboard.KeyCode.from_char("d"):
-            with self.lock:
-                self.turning = 0
+            self.turning = 0
 
     def set_cpg_bias(self):
         if np.abs(self.forward) == 1.0:
@@ -130,7 +118,7 @@ class KeyBoardController(BaseController):
             self.gain_left = -1.0 * self.turning
             self.gain_right = 1.0 * self.turning
 
-    def get_cpg_joint_angles(self):
+    def get_cpg_joint_angles(self) -> Action:
         action = np.array([self.gain_left, self.gain_right])
 
         amps = np.repeat(np.abs(action[:, np.newaxis]), 3, axis=1).ravel()

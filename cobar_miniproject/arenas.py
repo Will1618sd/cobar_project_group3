@@ -1,9 +1,10 @@
+from typing import Callable
 import cv2
 import numpy as np
 import os
 
 from flygym.arena import FlatTerrain
-from flygym.examples.vision.arena import ObstacleOdorArena
+from flygym.arena import BaseArena
 
 
 def _get_random_target_position(
@@ -71,6 +72,149 @@ def _circ(
     thickness = 1 if outer else -1
     cv2.circle(img, center, radius, color, thickness)
 
+class ObstacleOdorArena(BaseArena):
+    num_sensors = 4
+
+    def __init__(
+        self,
+        terrain: BaseArena,
+        obstacle_positions: np.ndarray = np.array([(7.5, 0), (12.5, 5), (17.5, -5)]),
+        obstacle_colors: np.ndarray | tuple = (0, 0, 0, 1),
+        obstacle_radius: float = 1,
+        obstacle_height: float = 4,
+        odor_source: np.ndarray = np.array([[25, 0, 2]]),
+        peak_odor_intensity: np.ndarray = np.array([[1]]),
+        diffuse_func: Callable = lambda x: x**-2,
+        marker_colors: list[tuple[float, float, float, float]] | None = None,
+        marker_size: float = 0.1,
+    ):
+        self.terrain_arena = terrain
+        self.obstacle_positions = obstacle_positions
+        self.root_element = terrain.root_element
+        self.friction = terrain.friction
+        self.obstacle_radius = obstacle_radius
+        z_offset = terrain.get_spawn_position(np.zeros(3), np.zeros(3))[0][2]
+        obstacle_colors = np.array(obstacle_colors)
+        if obstacle_colors.shape == (4,):
+            obstacle_colors = np.array(
+                [obstacle_colors for _ in range(obstacle_positions.shape[0])]
+            )
+        else:
+            assert obstacle_colors.shape == (obstacle_positions.shape[0], 4)
+
+        self.odor_source = np.array(odor_source)
+        self.peak_odor_intensity = np.array(peak_odor_intensity)
+        self.num_odor_sources = self.odor_source.shape[0]
+        if self.odor_source.shape[0] != self.peak_odor_intensity.shape[0]:
+            raise ValueError(
+                "Number of odor source locations and peak intensities must match."
+            )
+        self.odor_dim = self.peak_odor_intensity.shape[1]
+        self.diffuse_func = diffuse_func
+
+        # Add markers at the odor sources
+        if marker_colors is None:
+            rgb = np.array([255, 127, 14]) / 255
+            marker_colors = [(*rgb, 1)] * self.num_odor_sources
+        self.marker_colors = marker_colors
+        self._odor_marker_geoms = []
+        for i, (pos, rgba) in enumerate(zip(self.odor_source, marker_colors)):
+            pos = list(pos)
+            pos[2] += z_offset
+            marker_body = self.root_element.worldbody.add(
+                "body", name=f"odor_source_marker_{i}", pos=pos, mocap=True
+            )
+            geom = marker_body.add(
+                "geom",
+                name="odor_source_marker_sensor",  # if we add sensor to the name it doesn't get added to the contact pairs: see `init_floor_contacts` in fly
+                type="capsule",
+                size=(marker_size, marker_size),
+                rgba=rgba,
+                contype=0,  # we also need to add these to not have it involved in any collisions
+                conaffinity=0,
+            )
+            self._odor_marker_geoms.append(geom)
+
+        # Reshape odor source and peak intensity arrays to simplify future calculations
+        _odor_source_repeated = self.odor_source[:, np.newaxis, np.newaxis, :]
+        _odor_source_repeated = np.repeat(_odor_source_repeated, self.odor_dim, axis=1)
+        _odor_source_repeated = np.repeat(
+            _odor_source_repeated, self.num_sensors, axis=2
+        )
+        self._odor_source_repeated = _odor_source_repeated
+        _peak_intensity_repeated = self.peak_odor_intensity[:, :, np.newaxis]
+        _peak_intensity_repeated = np.repeat(
+            _peak_intensity_repeated, self.num_sensors, axis=2
+        )
+        self._peak_intensity_repeated = _peak_intensity_repeated
+
+        # Add obstacles
+        self.obstacle_bodies = []
+        obstacle_material = self.root_element.asset.add(
+            "material", name="obstacle", reflectance=0.1
+        )
+        self.obstacle_z_pos = z_offset + obstacle_height / 2
+        for i in range(obstacle_positions.shape[0]):
+            obstacle_pos = [*obstacle_positions[i, :], self.obstacle_z_pos]
+            obstacle_color = obstacle_colors[i]
+            obstacle_body = self.root_element.worldbody.add(
+                "body", name=f"obstacle_{i}", mocap=True, pos=obstacle_pos
+            )
+            self.obstacle_bodies.append(obstacle_body)
+            obstacle_body.add(
+                "geom",
+                type="cylinder",
+                size=(obstacle_radius, obstacle_height / 2),
+                rgba=obstacle_color,
+                material=obstacle_material,
+                contype="0",
+                conaffinity="8",
+            )
+
+    def get_spawn_position(
+        self, rel_pos: np.ndarray, rel_angle: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        return self.terrain_arena.get_spawn_position(rel_pos, rel_angle)
+
+    def get_olfaction(self, antennae_pos: np.ndarray) -> np.ndarray:
+        antennae_pos_repeated = antennae_pos[np.newaxis, np.newaxis, :, :]
+        dist_3d = antennae_pos_repeated - self._odor_source_repeated  # (n, k, w, 3)
+        dist_euc = np.linalg.norm(dist_3d, axis=3)  # (n, k, w)
+        scaling = self.diffuse_func(dist_euc)  # (n, k, w)
+        intensity = self._peak_intensity_repeated * scaling  # (n, k, w)
+        return intensity.sum(axis=0)  # (k, w)
+
+    def pre_visual_render_hook(self, physics):
+        # hide elements that we don't want to see in the fly's vision
+        # but only in the external camera
+        for geom, rgba in zip(
+            self._odor_marker_geoms,
+            self.marker_colors,
+        ):
+            physics.bind(geom).rgba = np.array([*rgba[:3], 0])
+        ground = self.terrain_arena.root_element.find(
+            namespace="geom", identifier="ground"
+        )
+        assert ground is not None, "Couldn't find the ground"
+        physics.bind(ground).rgba = np.array([*physics.bind(ground).rgba[:3], 0])
+
+    def post_visual_render_hook(self, physics):
+        # show elements that we don't want to see in the fly's vision
+        # but only in the external camera
+        for geom, rgba in zip(
+            self._odor_marker_geoms,
+            self.marker_colors,
+        ):
+            physics.bind(geom).rgba = np.array([*rgba[:3], 1])
+        ground = self.terrain_arena.root_element.find(
+            namespace="geom", identifier="ground"
+        )
+        assert ground is not None, "Couldn't find the ground"
+        physics.bind(ground).rgba = np.array([*physics.bind(ground).rgba[:3], 1])
+
+    def _get_max_floor_height(self) -> float:
+        return self.terrain_arena._get_max_floor_height()
+
 
 class OdorTargetOnlyArena(ObstacleOdorArena):
     def __init__(
@@ -80,7 +224,7 @@ class OdorTargetOnlyArena(ObstacleOdorArena):
         target_angle_range=(-np.pi, np.pi),
         target_marker_size=0.3,
         target_marker_color=(1, 0.5, 14 / 255, 1),
-        to_target_distance=2.0,
+        to_target_distance=3.0,
         seed=None,
         **kwargs,
     ):
@@ -106,10 +250,6 @@ class OdorTargetOnlyArena(ObstacleOdorArena):
             marker_size=target_marker_size,
             **kwargs,
         )
-
-        # set the floor white with full alpha
-        self.root_element.find_all("texture")[0].rgb1 = (1, 1, 1)
-        self.root_element.find_all("texture")[0].rgb2 = (1, 1, 1)
 
     def step(self, dt, physics):
         fly_pos = physics.bind(self.fly._body_sensors[0]).sensordata[:2].copy()
@@ -190,7 +330,7 @@ class ScatteredPillarsArena(ObstacleOdorArena):
         pillars_minimum_separation=6,
         fly_clearance_radius=4,
         seed=None,
-        to_target_distance=2.0,
+        to_target_distance=3.0,
         **kwargs,
     ):
         self.fly = fly
@@ -227,10 +367,6 @@ class ScatteredPillarsArena(ObstacleOdorArena):
             marker_size=target_marker_size,
             **kwargs,
         )
-
-        # set the floor white with full alpha
-        self.root_element.find_all("texture")[0].rgb1 = (1, 1, 1)
-        self.root_element.find_all("texture")[0].rgb2 = (1, 1, 1)
 
     @staticmethod
     def _get_pillar_positions(
@@ -327,7 +463,7 @@ class LoomingBallArena(OdorTargetOnlyArena):
         target_angle_range=(-np.pi, np.pi),
         target_marker_size=0.3,
         target_marker_color=(1, 0.5, 14 / 255, 1),
-        to_target_distance=2.0,
+        to_target_distance=3.0,
         ball_radius=1.0,
         ball_approach_vel=50,
         ball_approach_start_radius=20,
@@ -345,6 +481,7 @@ class LoomingBallArena(OdorTargetOnlyArena):
             target_marker_size=target_marker_size,
             target_marker_color=target_marker_color,
             to_target_distance=to_target_distance,
+            seed=seed,
             **kwargs,
         )
 
@@ -405,7 +542,7 @@ class LoomingBallArena(OdorTargetOnlyArena):
     def _setup_ball_heights(self):
         """Calculate ball positions for visible and resting states."""
         self.ball_rest_height = 10.0
-        self.ball_act_height = self.ball_radius + self._get_max_floor_height()
+        self.ball_act_height = self.ball_radius/4*3 + self._get_max_floor_height() 
 
     def _setup_velocity_buffer(self):
         """Setup a fixed-length FIFO buffer for fly velocity estimation."""
@@ -589,7 +726,7 @@ class HierarchicalArena(ScatteredPillarsArena, LoomingBallArena):
         pillars_minimum_separation=6,
         fly_clearance_radius=4,
         seed=None,
-        to_target_distance=2.0,
+        to_target_distance=3.0,
         ball_radius=1.0,
         ball_approach_vel=50,
         ball_approach_start_radius=20,
@@ -644,7 +781,7 @@ class FoodToNestArena(HierarchicalArena):
         pillars_minimum_separation=6,
         fly_clearance_radius=4,
         seed=None,
-        to_target_distance=2.0,
+        to_target_distance=3.0,
         ball_radius=1.0,
         ball_approach_vel=50,
         ball_approach_start_radius=20,
@@ -695,13 +832,11 @@ class FoodToNestArena(HierarchicalArena):
         self.pillar_height = pillar_height
 
     def pre_visual_render_hook(self, physics):
-        for geom, rgba in zip(self._odor_marker_geoms, self.marker_colors):
-            physics.bind(geom).rgba = np.array([*rgba[:3], 0])
+        OdorTargetOnlyArena.pre_visual_render_hook(self, physics)
         physics.bind(self.nest_geom).rgba[3] = 0
 
     def post_visual_render_hook(self, physics):
-        for geom, rgba in zip(self._odor_marker_geoms, self.marker_colors):
-            physics.bind(geom).rgba = np.array([*rgba[:3], 1])
+        OdorTargetOnlyArena.post_visual_render_hook(self, physics)
         physics.bind(self.nest_geom).rgba[3] = 1
 
     def setup_return_mode(self, physics):
@@ -709,8 +844,10 @@ class FoodToNestArena(HierarchicalArena):
         for geom in self._odor_marker_geoms:
             physics.bind(geom).rgba[3] = 0
 
+        # move the pillars under the arena and hide them
         for body in self.obstacle_bodies:
             physics.bind(body).mocap_pos[2] = -self.pillar_height - 5.0
+            physics.bind(body.find_all("geom")[0]).rgba = np.array([0, 0, 0, 0])
 
         self.move_ball(physics, 0, 0, self.ball_rest_height)
         self.make_ball_invisible(physics)
@@ -735,7 +872,3 @@ class FoodToNestArena(HierarchicalArena):
             if np.linalg.norm(self.target_position - fly_pos) < self.to_target_distance:
                 self.state = "returning"
                 self.setup_return_mode(physics)
-
-        if self.state == "returning":
-            if np.linalg.norm(self.nest_position - fly_pos) < self.to_target_distance:
-                self.quit = True

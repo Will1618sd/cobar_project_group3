@@ -39,4 +39,28 @@ You may run the `check_submission.py` script to check if your submission folder 
 ```bash
 conda activate flygym
 python check_submission.py <submission_folder>
-```"# cobar_project" 
+```
+
+## Creating a private copy while keeping track of the changes from the public repository
+1. Clone this repository
+```sh
+git clone https://github.com/NeLy-EPFL/cobar-miniproject-2025
+cd cobar-miniproject-2025
+```
+2. Create a New Private Repository on GitHub:
+- Go to GitHub and create a new private repository.
+- Do not initialize it with a README, .gitignore, or any other files.
+3. Set the New Private Repository as a Remote:
+```sh
+git remote rename origin upstream
+git remote add origin https://github.com/<your_username>/cobar-miniproject-2025
+```
+4. Push the Cloned Repository to Your Private Repository:
+```sh
+git push -u origin main
+```
+5. We will notify you if there are important changes to the repository. To fetch updates from the public repository and merge them into your private repository, use the following commands:
+```sh
+git fetch upstream
+git merge upstream/main
+```
