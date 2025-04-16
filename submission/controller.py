@@ -16,40 +16,121 @@ class Controller(BaseController):
         self.cpg_network = get_cpg(timestep=timestep, seed=seed)
         self.preprogrammed_steps = PreprogrammedSteps()
 
-        # # Get odor intensity
-        # odor_gain = -500
-        # odor_gradient = obs.odor_intensity[1] - obs.odor_intensity[0]
-        # attractive_bias = odor_gain * odor_gradient/obs.odor_intensity.mean()
-        # direction = int(attractive_bias > 0)
-
-        # motor_gain = 1
-        # control_signal[direction] = motor_gain*abs(attractive_bias)
-
-        # # # Get vision image
-        # fly_vision = obs.vision
-
-
-    def get_actions(self, obs: Observation) -> Action:
-        # Extract odor intensity from observations
+    def get_odor_bias(self, obs: Observation):
         odor_intensity = obs.get("odor_intensity", None)
         if odor_intensity is not None:
             # Example logic: Move toward the direction with the highest odor intensity
-            # print("Odor intensity:", odor_intensity.shape)
-            # left_odor = odor_intensity[0].mean()  # Left antenna
-            # right_odor = odor_intensity[1].mean()  # Right antenna
             attractive_intensities = np.average(
                 obs['odor_intensity'][0,:].reshape(2,2), axis=0, weights=[9,1]
             )
             odor_gradient = attractive_intensities[0] - attractive_intensities[1]
-            attractive_bias = -500 * odor_gradient / np.mean(odor_intensity)
+            attractive_bias = -500 * odor_gradient / np.mean(attractive_intensities)
             effective_bias = np.tanh(attractive_bias**2) * np.sign(attractive_bias)
             direction = int(effective_bias > 0)
-            control_signal = np.ones(2)
-            control_signal[direction] -= np.abs(effective_bias)
-            action = np.array(control_signal)
+            odor_bias = np.zeros(2)
+            odor_bias[direction] = np.abs(effective_bias)
             
         else:
-            action = np.array([1.0, 1.0])  # Default forward action
+            odor_bias = np.zeros(2)  
+
+        return odor_bias
+    
+    def get_vision_bias(self, obs: Observation):
+        
+        vision = obs.get("vision", None)
+        if vision is not None:
+            fly_vision = obs["vision"]
+            left_eye = fly_vision[0,:,:]
+            right_eye = fly_vision[1,:,:]
+
+            # Yellow : dark
+            yellow_left = left_eye[:,0].mean()
+            yellow_right = right_eye[:,0].mean()
+            
+            # Pale : light
+            pale_left = left_eye[:,1].mean()
+            pale_right = right_eye[:,1].mean()
+
+            yellow_gradient = yellow_left - yellow_right
+            pale_gradient = pale_left - pale_right
+
+            # vision_updated = obs.get("vision_updated", False)
+            # if vision_updated:
+            #     print("yellow gradient", np.round(yellow_gradient,4))
+            #     print("pale gradient  ", np.round(pale_gradient,4))
+
+            repulsive_bias = -150 * yellow_gradient
+            attractive_bias = 50 * pale_gradient
+
+            effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
+            direction = int(effective_bias > 0)
+            vision_bias = np.zeros(2)
+            vision_bias[direction] = np.abs(effective_bias)
+
+            return vision_bias
+                
+        return np.zeros(2)  # Default bias if no vision data is available
+    
+    def get_threat_response(self, obs: Observation):
+        
+        vision = obs.get("vision", None)
+        if vision is not None:
+            fly_vision = obs["vision"]
+            left_eye = fly_vision[0,:,:]
+            right_eye = fly_vision[1,:,:]
+
+            # Yellow : dark
+            yellow_left = left_eye[:,0].mean()
+            yellow_right = right_eye[:,0].mean()
+            
+            # Pale : light
+            pale_left = left_eye[:,1].mean()
+            pale_right = right_eye[:,1].mean()
+
+            yellow_gradient = yellow_left - yellow_right
+            pale_gradient = pale_left - pale_right
+
+            repulsive_bias = -100 * yellow_gradient
+            attractive_bias = 100 * pale_gradient
+
+            # Threat response -> speed up
+            if np.abs(repulsive_bias-attractive_bias) > 2:
+
+                vision_updated = obs.get("vision_updated", False)
+                if vision_updated:
+                    print("Threat detected!")
+
+                effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
+                direction = int(effective_bias < 0)
+                threat_response = np.zeros(2)
+                threat_response[direction] = np.abs(effective_bias)
+
+                return threat_response
+                
+        return np.zeros(2)
+
+
+    def get_actions(self, obs: Observation) -> Action:
+        
+        action = np.ones(2)
+        
+        # Extract odor intensity from observations
+        odor_bias = self.get_odor_bias(obs)
+        # action -= odor_bias
+
+        # Extract vision information from observations
+        vision_bias = self.get_vision_bias(obs)
+        # action -= vision_bias
+        
+        global_bias = 0.5*odor_bias + 0.5*vision_bias
+
+        action -= global_bias
+
+        # Threat response
+        threat_response = self.get_threat_response(obs)
+
+        action = np.tanh(threat_response+np.arctanh(np.clip(action,0,0.999)))
+        # np.clip(action, np.zeros(2), np.ones(2), out=action)
 
         # Generate joint angles and adhesion using the CPG network
         joint_angles, adhesion = step_cpg(

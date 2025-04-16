@@ -182,6 +182,12 @@ class CobarFly(Fly):
             "Rostrum",
             "Thorax",
         ]
+    
+    def reset(self, sim, **kwargs):
+        obs, info = super().reset(sim, **kwargs)
+        obs["vision_updated"] = True
+        obs["reached_odour"] = False
+        return obs, info
 
     def get_observation(self, sim: Simulation):
         # if we're running the fly in debug mode (for development) it will return all raw observations
@@ -344,7 +350,8 @@ class CobarFly(Fly):
             info["neck_actuation"] = self._last_neck_actuation
 
         # add some extra fields to the obs so the controller can access them
-        obs["vision_updated"] = info["vision_updated"]
+        if self.enable_vision:
+            obs["vision_updated"] = info["vision_updated"]
         obs["reached_odour"] = (
             getattr(sim.arena, "state", "exploring") == "returning"
         )  # this is only relevant for the path integration
