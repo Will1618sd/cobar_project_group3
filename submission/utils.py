@@ -4,7 +4,7 @@ import numpy as np
 def get_cpg(timestep, seed=0):
     from flygym.examples.locomotion import CPGNetwork
 
-    phase_biases = np.pi * np.array(
+    tripod_phase_biases = np.pi * np.array(
         [
             [0, 1, 0, 1, 0, 1],
             [1, 0, 1, 0, 1, 0],
@@ -14,6 +14,51 @@ def get_cpg(timestep, seed=0):
             [1, 0, 1, 0, 1, 0],
         ]
     )
+
+    tetrapod_phase_biases = (
+        2 * np.pi # note that the values below are pre-multiplied by 2*pi
+        * np.array(
+            [
+                # ================================================
+                # TODO: fill in the phase biases for tetrapod gait
+                [0, 1, 2, 2, 0, 1],
+                [2, 0, 1, 1, 2, 0],
+                [1, 2, 0, 0, 1, 2],
+                [1, 2, 0, 0, 1, 2],
+                [0, 1, 2, 2, 0, 1],
+                [2, 0, 1, 1, 2, 0],
+                # ================================================
+            ]
+        )
+        / 3
+    )
+
+    wave_phase_biases = (
+        2 * np.pi # note that the values below are pre-multiplied by 2*pi
+        * np.array(
+            [
+                # ================================================
+                # TODO: fill in the phase biases for wave gait
+                [0, 1, 2, 3, 4, 5],
+                [5, 0, 1, 2, 3, 4],
+                [4, 5, 0, 1, 2, 3],
+                [3, 4, 5, 0, 1, 2],
+                [2, 3, 4, 5, 0, 1],
+                [1, 2, 3, 4, 5, 0],
+                # ================================================
+            ]
+        )
+        / 6
+    )
+
+    gait_phase_biases = {
+        "tripod": tripod_phase_biases,
+        "tetrapod": tetrapod_phase_biases,
+        "wave": wave_phase_biases,
+    }
+
+    phase_biases = gait_phase_biases["tripod"]  
+
     coupling_weights = (phase_biases > 0) * 10
 
     return CPGNetwork(

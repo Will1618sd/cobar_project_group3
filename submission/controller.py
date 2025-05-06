@@ -67,12 +67,11 @@ class Controller(BaseController):
             #     print("yellow gradient", np.round(yellow_gradient,4))
             #     print("pale gradient  ", np.round(pale_gradient,4))
 
-            repulsive_bias = -150 * yellow_gradient
-            attractive_bias = 100 * pale_gradient
+            repulsive_bias = -150 * yellow_gradient - 100 * pale_gradient
 
             # effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
-            bias = repulsive_bias - attractive_bias
-            bias = bias/3
+            bias = repulsive_bias
+            bias = bias/2 # 3
             effective_bias = np.tanh(bias**2) * np.sign(bias)
 
             direction = int(effective_bias > 0)
@@ -159,7 +158,7 @@ class Controller(BaseController):
                     print("Yellow left: ", yellow_left)
                     print("Pale left: ", pale_left)
 
-                action[0] = 1
+                action[0] = 0.75
             
             if threat_right:
                 vision_updated = obs.get("vision_updated", False)
@@ -168,7 +167,7 @@ class Controller(BaseController):
                     print("Yellow right: ", yellow_right)
                     print("Pale right: ", pale_right)
 
-                action[1] = 1
+                action[1] = 0.75
                 
         return action
 
@@ -196,7 +195,7 @@ class Controller(BaseController):
         threat_response = self.get_threat_response(obs)
 
         for i in range(len(action)):
-            action[i] = np.tanh((1-threat_response[i])*np.arctanh(np.clip(action[i],0,0.999)))
+            action[i] = np.tanh((threat_response[i]) + np.arctanh(np.clip(action[i],0,0.999)))
 
         # np.clip(action, np.zeros(2), np.ones(2), out=action)
 
