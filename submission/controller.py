@@ -25,15 +25,23 @@ class Controller(BaseController):
             )
             odor_gradient = attractive_intensities[0] - attractive_intensities[1]
             attractive_bias = -500 * odor_gradient / np.mean(attractive_intensities)
+            attractive_bias = attractive_bias/10
             effective_bias = np.tanh(attractive_bias**2) * np.sign(attractive_bias)
             direction = int(effective_bias > 0)
             odor_bias = np.zeros(2)
             odor_bias[direction] = np.abs(effective_bias)
+
+            # vision_updated = obs.get("vision_updated", False)
+            # if vision_updated:
+            #     print("Odor bias: ", attractive_bias)
             
         else:
             odor_bias = np.zeros(2)  
 
         return odor_bias
+    
+    def alt_sigmoid(x):
+        return 1 / (2*(1 + np.exp(-(x-6))))
     
     def get_vision_bias(self, obs: Observation):
         
@@ -60,12 +68,20 @@ class Controller(BaseController):
             #     print("pale gradient  ", np.round(pale_gradient,4))
 
             repulsive_bias = -150 * yellow_gradient
-            attractive_bias = 50 * pale_gradient
+            attractive_bias = 100 * pale_gradient
 
-            effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
+            # effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
+            bias = repulsive_bias - attractive_bias
+            bias = bias/3
+            effective_bias = np.tanh(bias**2) * np.sign(bias)
+
             direction = int(effective_bias > 0)
             vision_bias = np.zeros(2)
             vision_bias[direction] = np.abs(effective_bias)
+
+            # vision_updated = obs.get("vision_updated", False)
+            # if vision_updated:
+            #     print("Vision bias: ", bias)
 
             return vision_bias
                 
@@ -82,32 +98,79 @@ class Controller(BaseController):
             # Yellow : dark
             yellow_left = left_eye[:,0].mean()
             yellow_right = right_eye[:,0].mean()
+            # yellow intensity is more affected by red light
+            # mean of yellow intensity when no threat : 0.68
+            # mean of yellow intensity when threat : 0.66
             
             # Pale : light
             pale_left = left_eye[:,1].mean()
             pale_right = right_eye[:,1].mean()
+            # mean of pale intensity when no threat : 0.29
+            # mean of pale intensity when threat : 0.27
 
-            yellow_gradient = yellow_left - yellow_right
-            pale_gradient = pale_left - pale_right
+            # vision_updated = obs.get("vision_updated", False)
+            # if vision_updated:
+            #     print("Yellow left: ", yellow_left)
+            #     print("Pale left: ", pale_left)
+            #     print("Yellow right: ", yellow_right)
+            #     print("Pale right: ", pale_right)
 
-            repulsive_bias = -100 * yellow_gradient
-            attractive_bias = 100 * pale_gradient
+            threat_left = False
+            threat_right = False
+            threat = False
+
+            if (pale_left <= 0.27) or (yellow_left <= 0.66):
+                threat_left = True
+                threat = True
+
+            if (pale_right <= 0.27) or (yellow_right <= 0.66):
+                threat_right = True
+                threat = True
+
+            # yellow_gradient = yellow_left - yellow_right
+            # pale_gradient = pale_left - pale_right
+
+            # repulsive_bias = -0 * yellow_gradient
+            # attractive_bias = 200 * pale_gradient
 
             # Threat response -> speed up
-            if np.abs(repulsive_bias-attractive_bias) > 2:
+            # if np.abs(repulsive_bias-attractive_bias) > 5:
 
+            #     vision_updated = obs.get("vision_updated", False)
+            #     if vision_updated:
+            #         print("Threat detected! : ", repulsive_bias-attractive_bias)
+
+            #     effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
+            #     direction = int(effective_bias < 0)
+            #     threat_response = np.zeros(2)
+            #     threat_response[direction] = np.abs(effective_bias)
+
+            #     return threat_response
+            
+            action = np.zeros(2)
+
+            # if threat:
+            #     action = np.ones(2)
+        
+            if threat_left:
                 vision_updated = obs.get("vision_updated", False)
                 if vision_updated:
-                    print("Threat detected!")
+                    print("Left : ", threat_left)
+                    print("Yellow left: ", yellow_left)
+                    print("Pale left: ", pale_left)
 
-                effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
-                direction = int(effective_bias < 0)
-                threat_response = np.zeros(2)
-                threat_response[direction] = np.abs(effective_bias)
+                action[0] = 1
+            
+            if threat_right:
+                vision_updated = obs.get("vision_updated", False)
+                if vision_updated:
+                    print("Right : ", threat_right)
+                    print("Yellow right: ", yellow_right)
+                    print("Pale right: ", pale_right)
 
-                return threat_response
+                action[1] = 1
                 
-        return np.zeros(2)
+        return action
 
 
     def get_actions(self, obs: Observation) -> Action:
@@ -122,14 +185,19 @@ class Controller(BaseController):
         vision_bias = self.get_vision_bias(obs)
         # action -= vision_bias
         
-        global_bias = 0.5*odor_bias + 0.5*vision_bias
-
+        # global_bias = 0.55*odor_bias + 0.45*vision_bias
+        global_bias = np.tanh(0.25 * np.arctanh(np.clip(odor_bias,0,0.999)) + 0.75 * np.arctanh(np.clip(vision_bias,0,0.999)))
+        # vision_updated = obs.get("vision_updated", False)
+        # if vision_updated:
+        #     print("Global bias: ", global_bias)
         action -= global_bias
 
         # Threat response
         threat_response = self.get_threat_response(obs)
 
-        action = np.tanh(threat_response+np.arctanh(np.clip(action,0,0.999)))
+        for i in range(len(action)):
+            action[i] = np.tanh((1-threat_response[i])*np.arctanh(np.clip(action[i],0,0.999)))
+
         # np.clip(action, np.zeros(2), np.ones(2), out=action)
 
         # Generate joint angles and adhesion using the CPG network

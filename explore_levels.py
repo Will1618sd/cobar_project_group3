@@ -1,4 +1,5 @@
 import argparse
+import numpy as np
 import cv2
 import tqdm
 from cobar_miniproject import levels
@@ -19,6 +20,7 @@ WITH_FLY_VISION = 1
 WITH_RAW_VISION = 2
 
 VISUALISATION_MODE = WITH_FLY_VISION
+# VISUALISATION_MODE = WITH_RAW_VISION
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the fly simulation.")
@@ -79,6 +81,29 @@ if __name__ == "__main__":
             if controller.done_level(obs):
                 # finish the path integration level
                 break
+
+            # vision_updated = obs.get("vision_updated", False)
+            # if vision_updated:
+
+            #     fly_vision = obs["vision"]
+            #     left_eye = fly_vision[0,:,:]
+            #     right_eye = fly_vision[1,:,:]
+
+            #     # Yellow : dark
+            #     yellow_left = left_eye[:,0].mean()
+            #     yellow_right = right_eye[:,0].mean()
+                
+            #     # Pale : light
+            #     pale_left = left_eye[:,1].mean()
+            #     pale_right = right_eye[:,1].mean()
+
+            #     yellow_gradient = yellow_left - yellow_right
+            #     pale_gradient = pale_left - pale_right
+
+            #     vision_updated = obs.get("vision_updated", False)
+            #     if vision_updated:
+            #         print("yellow gradient", np.round(yellow_gradient,4))
+            #         print("pale gradient  ", np.round(pale_gradient,4))
 
             obs_ = obs.copy()
             if not obs_["vision_updated"]:
