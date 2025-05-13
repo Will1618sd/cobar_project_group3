@@ -193,7 +193,7 @@ class CobarFly(Fly):
         # if we're running the fly in debug mode (for development) it will return all raw observations
         # otherwise, it will return only a reduced observation space with egocentric observations
         if self.debug:
-            return super().get_observation(sim)
+            raw_obs = super().get_observation(sim)
 
         physics = sim.physics
         actuated_joint_sensordata = physics.bind(
@@ -280,7 +280,7 @@ class CobarFly(Fly):
         )
         velocities_relative = CobarFly.absolute_to_relative_pos(
             fly_vel[:2],
-            fly_pos_xy,
+            np.zeros(2),
             fly_angle,
         )
 
@@ -302,6 +302,11 @@ class CobarFly(Fly):
             obs["vision"] = self._curr_visual_input
             if self.render_raw_vision:
                 obs["raw_vision"] = self.get_info()["raw_vision"]
+
+        # merge the observations
+        if self.debug:
+            for raw_key in raw_obs:
+                obs["debug_" + raw_key] = raw_obs[raw_key]
 
         return obs
 

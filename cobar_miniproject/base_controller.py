@@ -60,7 +60,7 @@ class BaseController(ABC):
             - `"end_effectors"` - the end effector positions in egocentric coordinates
             - `"contact_forces"` - the contact forces
             - `"heading"` - the fly's absolute heading
-            - `"velocity"` - the fly's velocity along x, y, z
+            - `"velocity"` - the fly's velocity along x, y
             - `"odor_intensity"` - the odour intensity in each antenna
             - `"vision"` - fly-like vision image
             - `"raw_vision"` - raw vision image
