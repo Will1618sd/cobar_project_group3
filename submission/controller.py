@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from cobar_miniproject.base_controller import Action, BaseController, Observation
 from .utils import get_cpg, step_cpg
 
@@ -20,6 +21,39 @@ class Controller(BaseController):
         self.vision_memory_vel = []
         self.vision_memory_acc = []
 
+        self.position = np.zeros(2)     # position initiale [x, y]
+        self.heading  = 0.0             # cap initial (en radians)
+        self.dt       = timestep        # même pas de temps que le CPG
+        self.history = [self.position.copy()]
+        self.vel_buffer = []        # buffer pour stocker les dernières vitesses
+        self.buffer_size = 1000        # taille de la fenêtre (à ajuster)
+        self.heading_buffer      = []
+        self.heading_buffer_size = 1000
+
+        # Step counter for downsampling plot
+        self.step_count = 0
+        self.plot_interval = 300      # plot every N steps
+        self.history = [self.position.copy()]
+
+        # Initialisation du plot en mode interactif
+        plt.ion()
+        self.fig, self.ax = plt.subplots()
+        self.line, = self.ax.plot([], [], '-o')
+        self.ax.set_xlabel('X (mm)')
+        self.ax.set_ylabel('Y (mm)')
+        self.ax.set_title('Trajectoire de la mouche')
+        self.ax.grid(True)
+        self.ax.set_aspect('equal', adjustable='box')
+
+    @staticmethod
+    def integrate_position(prev_pos: np.ndarray, v_rel: np.ndarray, heading: float, dt: float) -> np.ndarray:
+        rot_back = np.array([
+            [np.cos(heading),  -np.sin(heading)],
+            [np.sin(heading), np.cos(heading)]
+        ])
+        v_world = rot_back @ v_rel
+        return prev_pos + v_world * dt
+    
     def get_odor_bias(self, obs: Observation):
         odor_intensity = obs.get("odor_intensity", None)
         if odor_intensity is not None:
@@ -441,39 +475,92 @@ class Controller(BaseController):
     def get_actions(self, obs: Observation):
         vision_updated = obs.get("vision_updated", False)
 
-        odor_action = self.get_odor_bias(obs)
+        # --- Filtrage passe-bas sur la vitesse ---
+        v_rel = obs.get("velocity", np.zeros(2))
+        self.vel_buffer.append(v_rel)
+        if len(self.vel_buffer) > self.buffer_size:
+            self.vel_buffer.pop(0)
+        v_filt = np.mean(self.vel_buffer, axis=0)
+
+        # --- Filtrage passe-bas (moyenne circulaire) sur le cap ---
+        raw_h = obs.get("heading", self.heading)
+        self.heading_buffer.append(raw_h)
+        if len(self.heading_buffer) > self.heading_buffer_size:
+            self.heading_buffer.pop(0)
+        angles = np.array(self.heading_buffer)
+        sin_avg = np.sin(angles).mean()
+        cos_avg = np.cos(angles).mean()
+        h_filt = np.arctan2(sin_avg, cos_avg)
+
+        # --- Intégration de la position avec filtres ---
+        self.position = self.integrate_position(self.position, v_filt, h_filt, self.dt)
+        self.heading  = h_filt
+
+        # --- Logique CPG (odor, vision, threat) ---
+        odor_action   = self.get_odor_bias(obs)
         vision_action = self.get_vision_bias(obs)
         threat_action = self.get_threat_response(obs)
 
         if (threat_action != 0).all():
             action = threat_action
-            
-            if vision_updated:
-                print("Threat detected")
-
-        elif (vision_action > 0.9).all(): # No obstacle
-            action = 0.7*odor_action + 0.3*vision_action
-
-            if vision_updated:
-                print("No obstacle")
-
+        elif (vision_action > 0.9).all():
+            action = 0.7 * odor_action + 0.3 * vision_action
         else:
-            action = 0.3*odor_action + 0.7*vision_action
+            action = 0.3 * odor_action + 0.7 * vision_action
 
-        # Generate joint angles and adhesion using the CPG network
         joint_angles, adhesion = step_cpg(
             cpg_network=self.cpg_network,
             preprogrammed_steps=self.preprogrammed_steps,
             action=action,
         )
 
+        # Récupérer vélocité relative et cap
+        v_rel = obs.get("velocity", np.zeros(2))
+        heading = obs.get("heading", self.heading)
+
+        # Mise à jour de la position
+        self.position = self.integrate_position(self.position, v_rel, heading, self.dt)
+        self.heading = heading
+
+        # Incrémenter le compteur et tracer tous les plot_interval pas
+        self.step_count += 1
+        if self.step_count % self.plot_interval == 0:
+            self.history.append(self.position.copy())
+            data = np.array(self.history)
+            self.line.set_data(data[:, 0], data[:, 1])
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
         return {
             "joints": joint_angles,
             "adhesion": adhesion,
         }
 
-    def done_level(self, obs: Observation):
+    def done_level(self, obs: Observation) -> bool:
+        # Lorsque la simulation se termine, enregistrer le graphique
+        if self.quit:
+            self.history.append(self.position.copy())
+            data = np.array(self.history)
+            self.line.set_data(data[:, 0], data[:, 1])
+            self.ax.relim()
+            self.ax.autoscale_view()
+
+            self.fig.canvas.draw()
+
+            import os
+            save_dir = os.getcwd()
+            save_path = os.path.join(save_dir, "trajectory.png")
+            self.fig.savefig(save_path, dpi=300)
+            print(f"Graphique enregistré sous '{save_path}'.")
         return self.quit
 
     def reset(self, **kwargs):
         self.cpg_network.reset()
+        self.position = np.zeros(2)
+        self.heading = 0.0
+        self.step_count = 0
+        self.history = [self.position.copy()]
+        self.line.set_data([], [])
+        self.ax.relim()
+        self.ax.autoscale_view()
