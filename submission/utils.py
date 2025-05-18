@@ -20,7 +20,7 @@ def get_cpg(timestep, seed=0):
         * np.array(
             [
                 # ================================================
-                # TODO: fill in the phase biases for tetrapod gait
+                # fill in the phase biases for tetrapod gait
                 [0, 1, 2, 2, 0, 1],
                 [2, 0, 1, 1, 2, 0],
                 [1, 2, 0, 0, 1, 2],
@@ -38,7 +38,7 @@ def get_cpg(timestep, seed=0):
         * np.array(
             [
                 # ================================================
-                # TODO: fill in the phase biases for wave gait
+                # fill in the phase biases for wave gait
                 [0, 1, 2, 3, 4, 5],
                 [5, 0, 1, 2, 3, 4],
                 [4, 5, 0, 1, 2, 3],

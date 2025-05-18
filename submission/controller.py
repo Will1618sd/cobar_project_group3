@@ -16,7 +16,8 @@ class Controller(BaseController):
         self.quit = False
         self.cpg_network = get_cpg(timestep=timestep, seed=seed)
         self.preprogrammed_steps = PreprogrammedSteps()
-        self.odor_memory = []
+        self.odor_memory_pos = []
+        self.odor_memory_vel = []
         self.vision_memory_pos = []
         self.vision_memory_vel = []
         self.vision_memory_acc = []
@@ -29,6 +30,7 @@ class Controller(BaseController):
         self.buffer_size = 1000        # taille de la fenêtre (à ajuster)
         self.heading_buffer      = []
         self.heading_buffer_size = 1000
+        self.alpha = 0.7
 
         # Step counter for downsampling plot
         self.step_count = 0
@@ -61,184 +63,193 @@ class Controller(BaseController):
             attractive_intensities = np.average(
                 obs['odor_intensity'][0,:].reshape(2,2), axis=0, weights=[9,1]
             )
-            # odor_gradient = attractive_intensities[0] - attractive_intensities[1]
-            # attractive_bias = -500 * odor_gradient / np.mean(attractive_intensities)
-            # attractive_bias = attractive_bias/10
-            # effective_bias = np.tanh(attractive_bias**2) * np.sign(attractive_bias)
-            # direction = int(effective_bias > 0)
-            # odor_bias = np.zeros(2)
-            # odor_bias[direction] = np.abs(effective_bias)
 
-            vision_updated = obs.get("vision_updated", False)
-            # if vision_updated:
-            #     print("Odor bias: ", attractive_bias)
+            odor_left, odor_right = attractive_intensities
+            odor_intensity = np.mean(attractive_intensities)
 
-            left_attr_odor = attractive_intensities[0] 
-            right_attr_odor = attractive_intensities[1]
+            odor_speed = 1
+            odor_gradient = odor_left-odor_right
+            turning_bias = 50*odor_gradient/odor_intensity # turn left if turning_bias > 0, turn right if turning_bias < 0
 
-            mean_attr_odor = np.mean(attractive_intensities)
+            # Olfactive variation
+            if len(self.odor_memory_pos) >= 2: # Taking memories into consideration
+                odor_left_1 = self.odor_memory_pos[-1][0]
+                odor_right_1 = self.odor_memory_pos[-1][1]
+                odor_gradient_1 = self.odor_memory_pos[-1][2]
+                odor_intensity_1 = self.odor_memory_pos[-1][3]
 
-            odor_gradient = left_attr_odor-right_attr_odor
+                odor_left_velocity = (odor_left - odor_left_1)/self.dt
+                odor_right_velocity = (odor_right - odor_right_1)/self.dt
+                odor_gradient_velocity = (odor_gradient - odor_gradient_1)/self.dt
+                odor_intensity_velocity = (odor_intensity - odor_intensity_1)/self.dt
 
-            turning_bias = 50*odor_gradient/mean_attr_odor
+            if len(self.odor_memory_vel) >= 1: 
+                # Filtering
+                odor_left_velocity_1 = self.odor_memory_vel[-1][0]
+                odor_right_velocity_1 = self.odor_memory_vel[-1][1]
+                odor_gradient_velocity_1 = self.odor_memory_vel[-1][2]
+                odor_intensity_velocity_1 = self.odor_memory_vel[-1][3]
+                
+                odor_left_velocity = self.alpha*odor_left_velocity + (1-self.alpha)*odor_left_velocity_1
+                odor_right_velocity = self.alpha*odor_right_velocity + (1-self.alpha)*odor_right_velocity_1
+                odor_gradient_velocity = self.alpha*odor_gradient_velocity + (1-self.alpha)*odor_gradient_velocity_1
+                odor_intensity_velocity = self.alpha*odor_intensity_velocity + (1-self.alpha)*odor_intensity_velocity_1
 
-            self.odor_memory.append([left_attr_odor, right_attr_odor, odor_gradient]) 
+                # if (np.abs(odor_gradient) < 1e-5) or (turning_bias/odor_intensity < 100) : # Small gradient or big odor source --> turn less
+                #     # Gentle turn
+                #     action = [odor_speed, turning_bias]
+                # else: 
+                #     # Hard turn
+                #     action = [0.1, turning_bias*100]
 
-            if len(self.odor_memory) > 10:
-                self.odor_memory.pop(0)
-
-            if len(self.odor_memory) > 5: # Taking memories into consideration
-                left_attr_odor_1 = np.mean(self.odor_memory[-2][0])
-                right_attr_odor_1 = np.mean(self.odor_memory[-2][1])
-                odor_gradient_1 = np.mean(self.odor_memory[-2][2])
-                odor_gradient_std = np.std(self.odor_memory[0:-2][2])
-
-                # Choose for each case 
-                if left_attr_odor > right_attr_odor:
-                    # Turn left
-                    if (np.abs(odor_gradient) < 1e-5) or (turning_bias/mean_attr_odor < 100) : # Small gradient or big odor source --> turn less
-                        # if vision_updated:
-                        #     print(f"\nsoft turn : {odor_gradient}")
-                        #     print(f"Bias {turning_bias}")
-                        #     print(f"{np.abs(odor_gradient)-np.abs(odor_gradient_1)}")
-                        # Gentle turn
-                        r_speed = np.tanh(np.abs(turning_bias))
-                        return np.array([1-r_speed, 1])
-                    else: 
-                        # if vision_updated:
-                        #     print(f"\nhard turn : {odor_gradient}")
-                        #     print(f"Bias {turning_bias}")
-                        #     print(f"{np.abs(odor_gradient)-np.abs(odor_gradient_1)}")
-                        # Hard turn
-                        return np.array([-0.75, 1])
+                if ((np.abs(odor_gradient) > 1e-5) or odor_intensity_velocity < 0) and (turning_bias/odor_intensity > 100):
+                    action = [0.55, 0.9*np.tanh(turning_bias*100)]
 
                 else:
-                    # Turn right
-                    if  (np.abs(odor_gradient) < 1e-5) or (np.abs(turning_bias)/mean_attr_odor < 100) : # Small gradient or big odor source --> turn less
-                        # if vision_updated:
-                        #     print(f"\nsoft turn : {odor_gradient}")
-                        #     print(f"Bias {turning_bias}")
-                        #     print(f"{np.abs(odor_gradient)-np.abs(odor_gradient_1)}")
-                        # Gentle turn
-                        l_speed = np.tanh(np.abs(turning_bias))
-                        return np.array([1, 1-l_speed])
-                    else: # Angle >= 90°
-                        # if vision_updated:
-                        #     print(f"\nhard turn : {odor_gradient}")
-                        #     print(f"Bias {turning_bias}")
-                        #     print(f"{np.abs(odor_gradient)-np.abs(odor_gradient_1)}")
-                        # Hard turn
-                        return np.array([1, -0.75])
+                    action = [odor_speed, turning_bias]
             
             else: # Not enough memories
-                if left_attr_odor > right_attr_odor:
-                    # Turn left
-                    r_speed = np.tanh(np.abs(turning_bias))
-                    return np.array([1-r_speed, 1])
-                else:
-                    # Turn right
-                    l_speed = np.tanh(np.abs(turning_bias))
-                    return np.array([1, 1-l_speed])
+                odor_speed = 0.5
+                action = [odor_speed, turning_bias]
+            
 
+            # Olfactive memory
+            self.odor_memory_pos.append([odor_left, odor_right, odor_gradient, odor_intensity]) 
+            if len(self.odor_memory_pos) > 3:
+                self.odor_memory_pos.pop(0)
 
+            if len(self.odor_memory_pos) >= 3:
+                self.odor_memory_vel.append([odor_left_velocity, odor_right_velocity, odor_gradient_velocity, odor_intensity_velocity]) 
+                if len(self.odor_memory_vel) > 3:
+                    self.odor_memory_vel.pop(0)
+       
+            # Print if needed
+            # vision_updated = obs.get("vision_updated", False)
+            # if vision_updated and len(self.odor_memory_vel) >= 2:
+            #     print(f"Position : left : {odor_left}, right : {odor_right}, gradient : {odor_gradient}, intensity : {odor_intensity}")
+            #     print(f"Velocity : left : {odor_left_velocity}, right : {odor_right_velocity}, gradient : {odor_gradient_velocity}, intensity : {odor_intensity_velocity}")
 
+            return action
             
         else: 
-            odor_bias = np.zeros(2)  
+            return [0, 0]  
+ 
 
-        return odor_bias
-    
-    def alt_sigmoid(x):
-        return 1 / (2*(1 + np.exp(-(x-6))))
-    
     def get_vision_bias(self, obs: Observation):
+
+        dt = 0.0005 # 5s/10000it
+        alpha = 0.7
         
         vision = obs.get("vision", None)
         if vision is not None:
-            fly_vision = obs["vision"]
+            fly_vision = obs["vision"] # pixels have range of [0, 1], no obstacle : mean ~ 0.5
             left_eye = fly_vision[0,:,:]
             right_eye = fly_vision[1,:,:]
 
             # Mean pixels value --- Yellow : dark | Pale : light
+
+            # Yellow : few obstacle ~ 0.70, large obstacle ~ 0.40
             yellow_left = left_eye[:,0].mean()
             yellow_right = right_eye[:,0].mean()
+
+            # Pale : few obstacle ~ 0.30, large obstacle ~ 0.23
             pale_left = left_eye[:,1].mean()
             pale_right = right_eye[:,1].mean()
-            self.vision_memory_pos.append([yellow_left, pale_left, yellow_right, pale_right]) 
-            if len(self.vision_memory_pos) > 4:
-                self.vision_memory_pos.pop(0)
 
-            dt = 0.0005 # 5s/10000it
+            # Dark pixels 
+            dark_left = np.sum(left_eye[:, 0] == 0)
+            dark_right = np.sum(right_eye[:, 0] == 0)
 
             # Mean pixels changes (first derivative)
-            if len(self.vision_memory_pos) >= 2:
-                yellow_left_1 = self.vision_memory_pos[-2][0]
-                pale_left_1 = self.vision_memory_pos[-2][1]
-                yellow_right_1 = self.vision_memory_pos[-2][2]
-                pale_right_1 = self.vision_memory_pos[-2][3]
+            if len(self.vision_memory_pos) >= 1:
+                yellow_left_1 = self.vision_memory_pos[-1][0]
+                pale_left_1 = self.vision_memory_pos[-1][1]
+                yellow_right_1 = self.vision_memory_pos[-1][2]
+                pale_right_1 = self.vision_memory_pos[-1][3]
                 # First derivatives (velocity)
-                yellow_left_velocity = (yellow_left - yellow_left_1) / dt
-                pale_left_velocity = (pale_left - pale_left_1) / dt
-                yellow_right_velocity = (yellow_right - yellow_right_1) / dt
-                pale_right_velocity = (pale_right - pale_right_1) / dt
-                self.vision_memory_vel.append([yellow_left_velocity, pale_left_velocity, yellow_right_velocity, pale_right_velocity])
-            if len(self.vision_memory_vel) > 4:
-                self.vision_memory_vel.pop(0)
+                yellow_left_velocity = (yellow_left - yellow_left_1) / self.dt
+                pale_left_velocity = (pale_left - pale_left_1) / self.dt
+                yellow_right_velocity = (yellow_right - yellow_right_1) / self.dt
+                pale_right_velocity = (pale_right - pale_right_1) / self.dt
+
             
-            # Mean pixels looms (second derivative)
-            if len(self.vision_memory_vel) >= 2:
-                yellow_left_velocity_1 = self.vision_memory_vel[-2][0]
-                pale_left_velocity_1 = self.vision_memory_vel[-2][1]
-                yellow_right_velocity_1 = self.vision_memory_vel[-2][2]
-                pale_right_velocity_1 = self.vision_memory_vel[-2][3]
+            # Mean pixels looming (second derivative)
+            if len(self.vision_memory_vel) >= 1: 
+                # Filtering
+                yellow_left_velocity_1 = self.vision_memory_vel[-1][0]
+                pale_left_velocity_1 = self.vision_memory_vel[-1][1]
+                yellow_right_velocity_1 = self.vision_memory_vel[-1][2]
+                pale_right_velocity_1 = self.vision_memory_vel[-1][3]
+
+                yellow_left_velocity = alpha*yellow_left_velocity + (1-alpha)*yellow_left_velocity_1
+                pale_left_velocity = alpha*pale_left_velocity + (1-alpha)*pale_left_velocity_1
+                yellow_right_velocity = alpha*yellow_right_velocity + (1-alpha)*yellow_right_velocity_1
+                pale_right_velocity = alpha*pale_right_velocity + (1-alpha)*pale_right_velocity_1
+                
                 # Second derivatives (acceleration)
-                yellow_left_acceleration = (yellow_left_velocity - yellow_left_velocity_1) / dt
-                pale_left_acceleration = (pale_left_velocity - pale_left_velocity_1) / dt
-                yellow_right_acceleration = (yellow_right_velocity - yellow_right_velocity_1) / dt
-                pale_right_acceleration = (pale_right_velocity - pale_right_velocity_1) / dt
+                yellow_left_acceleration = (yellow_left_velocity - yellow_left_velocity_1) / self.dt
+                pale_left_acceleration = (pale_left_velocity - pale_left_velocity_1) / self.dt
+                yellow_right_acceleration = (yellow_right_velocity - yellow_right_velocity_1) / self.dt
+                pale_right_acceleration = (pale_right_velocity - pale_right_velocity_1) / self.dt
+            
+            if len(self.vision_memory_acc) >= 1: 
+                # Filtering
+                yellow_left_acceleration_1 = self.vision_memory_acc[-1][0]
+                pale_left_acceleration_1 = self.vision_memory_acc[-1][1]
+                yellow_right_acceleration_1 = self.vision_memory_acc[-1][2]
+                pale_right_acceleration_1 = self.vision_memory_acc[-1][3]
+
+                yellow_left_acceleration = alpha*yellow_left_acceleration + (1-alpha)*yellow_left_acceleration_1
+                pale_left_acceleration = alpha*pale_left_acceleration + (1-alpha)*pale_left_acceleration_1
+                yellow_right_acceleration = alpha*yellow_right_acceleration + (1-alpha)*yellow_right_acceleration_1
+                pale_right_acceleration = alpha*pale_right_acceleration + (1-alpha)*pale_right_acceleration_1
+
+                
+            # Normal vision response
+            yellow_gradient = yellow_left - yellow_right # if gradient > 0 -> less obstacle on left -> turn left
+            pale_gradient = pale_left - pale_right
+            mean_gradient = left_eye.mean() - right_eye.mean()
+
+            mean_obstacle = fly_vision.mean() # lower == obstacles, few obstacles -> 0.48-0.59, no obstacle -> 0.50
+
+            vision_speed = np.tanh((mean_obstacle-0.4)/(0.5-0.4))*3/4 +1/4 # function to keep high speed for x < soft threshold, but low speed after
+            turning_bias = np.tanh((75*mean_gradient)**3) # function to turn little when medium/low but turn way more when bigger
+            turning_bias = np.tanh(turning_bias - (dark_left-dark_right)/10)
+
+            vision_response = [vision_speed, turning_bias]
+
+            # Vision change response 
+            if len(self.vision_memory_pos) >= 1: 
+                left_eye_change = (yellow_left_velocity + pale_left_velocity)/2 # obstacle approaching -> velocity < 0
+                right_eye_change = (yellow_right_velocity + pale_right_velocity)/2
+                change_gradient = left_eye_change - right_eye_change # if right obstacle approaching -> gradient > 0 -> turn left
+                turning_bias += change_gradient/10
+
+
+            # Append to memory + deletion
+            self.vision_memory_pos.append([yellow_left, pale_left, yellow_right, pale_right]) 
+            if len(self.vision_memory_pos) > 3:
+                self.vision_memory_pos.pop(0)
+
+            if len(self.vision_memory_pos) >= 2:
+                self.vision_memory_vel.append([yellow_left_velocity, pale_left_velocity, yellow_right_velocity, pale_right_velocity])
+            if len(self.vision_memory_vel) > 2:
+                self.vision_memory_vel.pop(0)
+
+            if len(self.vision_memory_vel) >= 2:
                 self.vision_memory_acc.append([yellow_left_acceleration, pale_left_acceleration, yellow_right_acceleration, pale_right_acceleration])
             if len(self.vision_memory_acc) > 3:
                 self.vision_memory_acc.pop(0)
 
-            # Normal vision response
-            yellow_gradient = yellow_left - yellow_right
-            pale_gradient = pale_left - pale_right
-
-            bias = -50 * yellow_gradient - 50 * pale_gradient
-            effective_bias = np.tanh(bias) # if left obstacle -> effective bias > 0
-            obstacle_pos = int(effective_bias < 0) # if left obstacle -> position = 0 -> reduce right side velocity
-
-            vision_response = np.ones(2)
-            for i in range(len(vision_response)):
-                vision_response[i] = 1 - np.abs(effective_bias)*np.abs(i-obstacle_pos)
-
-            # Vision change response
-            # if approaching on right -> yellow/pale_right_velocity < 0 -> decrease left speed
-            if len(self.vision_memory_pos) < 2:
-                yellow_left_velocity = 0
-                pale_left_velocity = 0
-                yellow_right_velocity = 0
-                pale_right_velocity = 0
-            left_eye_change = (yellow_left_velocity + pale_left_velocity)/2
-            right_eye_change = (yellow_right_velocity + pale_right_velocity)/2
-
-            if left_eye_change < -2:
-                vision_response[1] = np.clip(vision_response[1] - np.abs(left_eye_change)/20, -1, 1)
-            if right_eye_change < -2:
-                vision_response[0] = np.clip(vision_response[0] - np.abs(right_eye_change)/20, -1, 1)
-                right_eye_change = 0
-
-            
-            
-            
-            vision_updated = obs.get("vision_updated", False)
-            # if vision_updated:
-            #     # print(f"Vision response: {vision_response}")
-            #     # print(f"Effective bias : {effective_bias}")
-            #     # print(f"Yellow gradient : {yellow_gradient}")
-            #     # print(f"Pale gradient : {pale_gradient}")
-            #     print(f"Left change {left_eye_change}")
-            #     print(f"Right change {right_eye_change}")
+            # Print if needed
+            # vision_updated = obs.get("vision_updated", False)
+            # if vision_updated and len(self.vision_memory_vel) >= 2:
+            #     print(f"Count nb of dark pixels : left : {dark_left}, right : {dark_right}")
+            #     print(f"\nMean vision : both : {mean_obstacle}, left : {left_eye.mean()}, right : {right_eye.mean()}")
+            #     print(f"Position gradient : {mean_gradient}")
+            #     print(f"Position : left - yellow : {yellow_left}, left - pale : {pale_left}, right - yellow : {yellow_right}, right - pale : {pale_right}")
+            #     print(f"Velocity : left - yellow : {yellow_left_velocity}, left - pale : {pale_left_velocity}, right - yellow : {yellow_right_velocity}, right - pale : {pale_right_velocity}")
+            #     print(f"Acceleration : left - yellow : {yellow_left_acceleration}, left - pale : {pale_left_acceleration}, right - yellow : {yellow_right_acceleration}, right - pale : {pale_right_acceleration}")
 
             return vision_response
 
@@ -247,20 +258,14 @@ class Controller(BaseController):
         threat_threshold = -10000
         action = np.array([0, 0])
 
-        if len(self.vision_memory_acc) > 2:
-            # print(f"Length {len(self.vision_memory_acc)}")
-            # print(f"Shape {np.shape(self.vision_memory_acc)}")
-            # print(self.vision_memory_acc[-4:-1])
-            # print(self.vision_memory_acc[0][:])
-            # print([vec[0] for vec in self.vision_memory_acc])
-            # print(self.vision_memory_acc[:][0])
+        if len(self.vision_memory_acc) >= 1:
+            yellow_left_looming = self.vision_memory_acc[-1][0]
+            pale_left_looming = self.vision_memory_acc[-1][1]
+            yellow_right_looming = self.vision_memory_acc[-1][2]
+            pale_right_looming = self.vision_memory_acc[-1][3]
+
             left_looming = np.mean([[vec[0] for vec in self.vision_memory_acc],[vec[1] for vec in self.vision_memory_acc]])
             right_looming = np.mean([[vec[2] for vec in self.vision_memory_acc],[vec[3] for vec in self.vision_memory_acc]])
-
-            vision_updated = obs.get("vision_updated", False)
-            # if vision_updated:
-            #     print(f"Left looming {left_looming}")
-            #     print(f"Right looming {right_looming}")
 
             if left_looming > right_looming: # Priority on left threat
                 if left_looming < threat_threshold:
@@ -271,233 +276,15 @@ class Controller(BaseController):
                 if right_looming < threat_threshold:
                     # Fast going back for left legs
                     action = np.array([-1, -1])
+
+            vision_updated = obs.get("vision_updated", False)
+            if vision_updated:
+                print(f"Looming : yellow - left : {yellow_left_looming}, right : {yellow_right_looming}")
+                print(f"Looming : pale - left : {pale_left_looming}, right : {pale_right_looming}")
         
         return action
 
-    # possible implementation of heading correction to filter the artifacts caused by head movements
     
-    # def get_vision_bias(self, obs: Observation):
-        
-    #     vision = obs.get("vision", None)
-    #     if vision is not None:
-    #         fly_vision = obs["vision"]
-    #         left_eye = fly_vision[0,:,:]
-    #         right_eye = fly_vision[1,:,:]
-
-    #         # Yellow : dark
-    #         yellow_left = left_eye[:,0].mean()
-    #         yellow_right = right_eye[:,0].mean()
-            
-    #         # Pale : light
-    #         pale_left = left_eye[:,1].mean()
-    #         pale_right = right_eye[:,1].mean()
-
-    #         yellow_gradient = yellow_left - yellow_right
-    #         pale_gradient = pale_left - pale_right
-
-    #         # vision_updated = obs.get("vision_updated", False)
-    #         # if vision_updated:
-    #         #     print("yellow gradient", np.round(yellow_gradient,4))
-    #         #     print("pale gradient  ", np.round(pale_gradient,4))
-
-    #         repulsive_bias = -150 * yellow_gradient - 100 * pale_gradient
-
-    #         # effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
-    #         bias = repulsive_bias
-    #         bias = bias/2 # 3
-    #         effective_bias = np.tanh(bias**2) * np.sign(bias)
-
-    #         direction = int(effective_bias > 0)
-    #         vision_bias = np.zeros(2)
-    #         vision_bias[direction] = np.abs(effective_bias)
-
-    #         # vision_updated = obs.get("vision_updated", False)
-    #         # if vision_updated:
-    #         #     print("Vision bias: ", bias)
-
-    #         return vision_bias
-                
-    #     return np.zeros(2)  # Default bias if no vision data is available
-    
-    # def get_threat_response(self, obs: Observation):
-        
-    #     vision = obs.get("vision", None)
-    #     if vision is not None:
-    #         fly_vision = obs["vision"]
-    #         left_eye = fly_vision[0,:,:]
-    #         right_eye = fly_vision[1,:,:]
-
-    #         # Yellow : dark
-    #         yellow_left = left_eye[:,0].mean()
-    #         yellow_right = right_eye[:,0].mean()
-    #         # yellow intensity is more affected by red light
-    #         # mean of yellow intensity when no threat : 0.68
-    #         # mean of yellow intensity when threat : 0.66
-            
-    #         # Pale : light
-    #         pale_left = left_eye[:,1].mean()
-    #         pale_right = right_eye[:,1].mean()
-    #         # mean of pale intensity when no threat : 0.29
-    #         # mean of pale intensity when threat : 0.27
-
-    #         # vision_updated = obs.get("vision_updated", False)
-    #         # if vision_updated:
-    #         #     print("Yellow left: ", yellow_left)
-    #         #     print("Pale left: ", pale_left)
-    #         #     print("Yellow right: ", yellow_right)
-    #         #     print("Pale right: ", pale_right)
-
-    #         dt = 0.0005
-
-    #         self.vision_memory_pos.append([yellow_left, pale_left, yellow_right, pale_right]) 
-
-    #         if len(self.vision_memory_pos) > 4:
-    #             self.vision_memory_pos.pop(0)
-
-    #         if len(self.vision_memory_pos) >= 2:
-    #             yellow_left_1 = self.vision_memory_pos[-2][0]
-    #             pale_left_1 = self.vision_memory_pos[-2][1]
-    #             yellow_right_1 = self.vision_memory_pos[-2][2]
-    #             pale_right_1 = self.vision_memory_pos[-2][3]
-
-    #             # First derivatives (velocity)
-    #             yellow_left_velocity = (yellow_left - yellow_left_1) / dt
-    #             pale_left_velocity = (pale_left - pale_left_1) / dt
-    #             yellow_right_velocity = (yellow_right - yellow_right_1) / dt
-    #             pale_right_velocity = (pale_right - pale_right_1) / dt
-
-    #             self.vision_memory_vel.append([yellow_left_velocity, pale_left_velocity, yellow_right_velocity, pale_right_velocity])
-            
-    #         if len(self.vision_memory_vel) > 4:
-    #             self.vision_memory_vel.pop(0)
-            
-    #         if len(self.vision_memory_vel) >= 2:
-    #             yellow_left_velocity_1 = self.vision_memory_vel[-2][0]
-    #             pale_left_velocity_1 = self.vision_memory_vel[-2][1]
-    #             yellow_right_velocity_1 = self.vision_memory_vel[-2][2]
-    #             pale_right_velocity_1 = self.vision_memory_vel[-2][3]
-
-    #             # Second derivatives (acceleration)
-    #             yellow_left_acceleration = (yellow_left_velocity - yellow_left_velocity_1) / dt
-    #             pale_left_acceleration = (pale_left_velocity - pale_left_velocity_1) / dt
-    #             yellow_right_acceleration = (yellow_right_velocity - yellow_right_velocity_1) / dt
-    #             pale_right_acceleration = (pale_right_velocity - pale_right_velocity_1) / dt
-
-    #             vision_updated = obs.get("vision_updated", False)
-    #             if vision_updated:
-    #                 # print("Yellow left acceleration: ", yellow_left_acceleration)
-    #                 # print("Pale left acceleration: ", pale_left_acceleration)
-    #                 # print("Yellow right acceleration: ", yellow_right_acceleration)
-    #                 # print("Pale right acceleration: ", pale_right_acceleration)
-
-    #                 print("Yellow left velocity: ", yellow_left_velocity)
-    #                 print("Pale left velocity: ", pale_left_velocity)
-    #                 print("Yellow right velocity: ", yellow_right_velocity)
-    #                 print("Pale right velocity: ", pale_right_velocity)
-
-    #             return np.zeros(2)
-            
-
-    #         return np.zeros(2)
-
-    #     #     threat_left = False
-    #     #     threat_right = False
-    #     #     threat = False
-
-    #     #     if (pale_left <= 0.27) or (yellow_left <= 0.66):
-    #     #         threat_left = True
-    #     #         threat = True
-
-    #     #     if (pale_right <= 0.27) or (yellow_right <= 0.66):
-    #     #         threat_right = True
-    #     #         threat = True
-
-    #     #     # yellow_gradient = yellow_left - yellow_right
-    #     #     # pale_gradient = pale_left - pale_right
-
-    #     #     # repulsive_bias = -0 * yellow_gradient
-    #     #     # attractive_bias = 200 * pale_gradient
-
-    #     #     # Threat response -> speed up
-    #     #     # if np.abs(repulsive_bias-attractive_bias) > 5:
-
-    #     #     #     vision_updated = obs.get("vision_updated", False)
-    #     #     #     if vision_updated:
-    #     #     #         print("Threat detected! : ", repulsive_bias-attractive_bias)
-
-    #     #     #     effective_bias = np.tanh((repulsive_bias-attractive_bias)**2) * np.sign(repulsive_bias-attractive_bias)
-    #     #     #     direction = int(effective_bias < 0)
-    #     #     #     threat_response = np.zeros(2)
-    #     #     #     threat_response[direction] = np.abs(effective_bias)
-
-    #     #     #     return threat_response
-            
-    #     #     action = np.zeros(2)
-
-    #     #     # if threat:
-    #     #     #     action = np.ones(2)
-        
-    #     #     if threat_left:
-    #     #         vision_updated = obs.get("vision_updated", False)
-    #     #         if vision_updated:
-    #     #             print("Left : ", threat_left)
-    #     #             print("Yellow left: ", yellow_left)
-    #     #             print("Pale left: ", pale_left)
-
-    #     #         action[0] = 0.75
-            
-    #     #     if threat_right:
-    #     #         vision_updated = obs.get("vision_updated", False)
-    #     #         if vision_updated:
-    #     #             print("Right : ", threat_right)
-    #     #             print("Yellow right: ", yellow_right)
-    #     #             print("Pale right: ", pale_right)
-
-    #     #         action[1] = 0.75
-                
-    #     # return action
-
-
-    # def get_actions(self, obs: Observation) -> Action:
-        
-    #     action = np.ones(2)
-        
-    #     # # Extract odor intensity from observations
-    #     # odor_bias = self.get_odor_bias(obs)
-    #     # # action -= odor_bias
-
-    #     # # Extract vision information from observations
-    #     # vision_bias = self.get_vision_bias(obs)
-    #     # # action -= vision_bias
-        
-    #     # # global_bias = 0.55*odor_bias + 0.45*vision_bias
-    #     # global_bias = np.tanh(0.25 * np.arctanh(np.clip(odor_bias,0,0.999)) + 0.75 * np.arctanh(np.clip(vision_bias,0,0.999)))
-    #     # # vision_updated = obs.get("vision_updated", False)
-    #     # # if vision_updated:
-    #     # #     print("Global bias: ", global_bias)
-    #     # action -= global_bias
-
-    #     # # Threat response
-    #     # threat_response = self.get_threat_response(obs)
-
-    #     # for i in range(len(action)):
-    #     #     action[i] = np.tanh((threat_response[i]) + np.arctanh(np.clip(action[i],0,0.999)))
-
-    #     # np.clip(action, np.zeros(2), np.ones(2), out=action)
-
-    #     action = self.get_odor_bias(obs)
-
-    #     # Generate joint angles and adhesion using the CPG network
-    #     joint_angles, adhesion = step_cpg(
-    #         cpg_network=self.cpg_network,
-    #         preprogrammed_steps=self.preprogrammed_steps,
-    #         action=action,
-    #     )
-
-    #     return {
-    #         "joints": joint_angles,
-    #         "adhesion": adhesion,
-    #     }
 
     def get_actions(self, obs: Observation):
         vision_updated = obs.get("vision_updated", False)
@@ -524,34 +311,29 @@ class Controller(BaseController):
         self.heading  = h_filt
 
         # --- Logique CPG (odor, vision, threat) ---
+        
         odor_action   = self.get_odor_bias(obs)
         vision_action = self.get_vision_bias(obs)
         threat_action = self.get_threat_response(obs)
+        
+        odor_power = np.clip(1-odor_action[0], 0, 1) # power of speed
+        vision_power = np.clip(np.abs(vision_action[1]), 0, 1) # power of turning
 
-        vision_power = np.tanh(np.abs(vision_action[0]-vision_action[1])) # when near 0, rely uniquely on odor, when increasing, increase vision 
+        weight_speed = (vision_power - odor_power/2 + 1/2)*2/3 # if vision>>odor -> 1, if odor>>vision -> 0
+        weight_turning = vision_power
 
-        if (threat_action != 0).all():
-            action = threat_action
-            
-            if vision_updated:
-                print("Threat detected")
+        speed = weight_speed*vision_action[0] + (1-weight_speed)*odor_action[0]
+        turning = weight_turning*vision_action[1] + (1-weight_turning)*odor_action[1]
 
-        # elif (vision_action.mean() > 0.9): # No obstacle
-        #     action = 0.7*odor_action + 0.3*vision_action
-
-        #     if vision_updated:
-        #         print("No obstacle")
-
-        else:
-            action = (1-vision_power)*odor_action + vision_power*vision_action
-            # action = 0.3*odor_action + 0.7*vision_action
-
-        if vision_updated:
-                print(f"Vision action {vision_action}")
-
-        # action = 0.5*odor_action + 0.5*vision_action
-
+        action = np.array([speed-turning/2, speed+turning/2])
         action = np.clip(action, -1, 1)
+
+        # vision_updated = obs.get("vision_updated", False)
+        # if vision_updated:
+        #     print(f"Odor : speed : {odor_action[0]}, turning : {odor_action[1]}")
+        #     print(f"Vision : speed : {vision_action[0]}, turning : {vision_action[1]}")
+        #     print(f"Action : speed : {speed}, turning : {turning}")
+        #     print(f"Action : left : {action[0]}, right : {action[1]}")
 
         joint_angles, adhesion = step_cpg(
             cpg_network=self.cpg_network,
