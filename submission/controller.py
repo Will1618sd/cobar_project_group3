@@ -9,6 +9,7 @@ class Controller(BaseController):
         self,
         timestep=1e-4,
         seed=0,
+        fly=None,
     ):
         from flygym.examples.locomotion import PreprogrammedSteps
 
@@ -47,6 +48,12 @@ class Controller(BaseController):
         self.ax.grid(True)
         self.ax.set_aspect('equal', adjustable='box')
 
+        # Homing behavior
+        self.home_position = self.position.copy()
+        self.returning_home = False
+
+        self.fly = fly
+    
     @staticmethod
     def integrate_position(prev_pos: np.ndarray, v_rel: np.ndarray, heading: float, dt: float) -> np.ndarray:
         rot_back = np.array([
@@ -56,6 +63,36 @@ class Controller(BaseController):
         v_world = rot_back @ v_rel
         return prev_pos + v_world * dt
     
+    def filter_velocity(self, obs: Observation) -> np.ndarray:
+        # --- Filtrage passe-bas sur la vitesse ---
+        v_rel = obs.get("velocity", np.zeros(2))
+        self.vel_buffer.append(v_rel)
+        if len(self.vel_buffer) > self.buffer_size:
+            self.vel_buffer.pop(0)
+        return np.mean(self.vel_buffer, axis=0)
+
+    def filter_heading(self, obs: Observation) -> float:
+        # --- Filtrage passe-bas (moyenne circulaire) sur le cap ---
+        raw_h = obs.get("heading", self.heading)
+        self.heading_buffer.append(raw_h)
+        if len(self.heading_buffer) > self.heading_buffer_size:
+            self.heading_buffer.pop(0)
+        angles = np.array(self.heading_buffer)
+        sin_avg = np.sin(angles).mean()
+        cos_avg = np.cos(angles).mean()
+        return np.arctan2(sin_avg, cos_avg)
+
+    def update_position_filters(self, v_filt: np.ndarray, h_filt: float):
+        # --- Intégration de la position avec filtres ---
+        self.position = self.integrate_position(self.position, v_filt, h_filt, self.dt)
+        self.heading  = h_filt
+    
+    def get_cpg_inputs(self, obs: Observation):
+        odor_action   = self.get_odor_bias(obs)
+        vision_action = self.get_vision_bias(obs)
+        threat_action = self.get_threat_response(obs)
+        return odor_action, vision_action, threat_action
+
     def get_odor_bias(self, obs: Observation):
         odor_intensity = obs.get("odor_intensity", None)
         if odor_intensity is not None:
@@ -350,26 +387,69 @@ class Controller(BaseController):
     def get_actions(self, obs: Observation):
         vision_updated = obs.get("vision_updated", False)
 
-        # --- Filtrage passe-bas sur la vitesse ---
-        v_rel = obs.get("velocity", np.zeros(2))
-        self.vel_buffer.append(v_rel)
-        if len(self.vel_buffer) > self.buffer_size:
-            self.vel_buffer.pop(0)
-        v_filt = np.mean(self.vel_buffer, axis=0)
+        v_filt = self.filter_velocity(obs)
+        h_filt = self.filter_heading(obs)
+        self.update_position_filters(v_filt, h_filt)
 
-        # --- Filtrage passe-bas (moyenne circulaire) sur le cap ---
-        raw_h = obs.get("heading", self.heading)
-        self.heading_buffer.append(raw_h)
-        if len(self.heading_buffer) > self.heading_buffer_size:
-            self.heading_buffer.pop(0)
-        angles = np.array(self.heading_buffer)
-        sin_avg = np.sin(angles).mean()
-        cos_avg = np.cos(angles).mean()
-        h_filt = np.arctan2(sin_avg, cos_avg)
+        # Check homing condition
+        if obs.get("reached_odour", False):
+            self.returning_home = True
 
-        # --- Intégration de la position avec filtres ---
-        self.position = self.integrate_position(self.position, v_filt, h_filt, self.dt)
-        self.heading  = h_filt
+        if self.returning_home:
+            # Desactivation of the vision (to save memory)
+            if self.fly is not None:
+                self.fly.get_info = lambda: {"raw_vision": None}
+            # Homing vector calculation
+            to_home = self.home_position - self.position
+            # Calculation of the heading angle to the home position
+            target_heading = np.arctan2(to_home[1], to_home[0])
+            # Calculate the heading error (difference between the target heading and the current heading)
+            err = (target_heading - self.heading + np.pi) % (2 * np.pi) - np.pi
+            # Calculate the distance to the home position
+            dist = np.linalg.norm(to_home)
+
+            print(f"[Homing] Distance to home: {dist:.2f}, Heading error: {np.rad2deg(err):.2f}°")
+
+            # Implementation of the bang bang control
+            # If the heading error is greater than 5 degrees, hard coding of a left or right turn to face the home position
+            # else advance straight ahead
+            if np.abs(err) > np.deg2rad(5):
+                if err > 0:
+                    action = np.array([-1.0, 1.0])  # tourner à gauche
+                else:
+                    action = np.array([1.0, -1.0])  # tourner à droite
+            else:
+                action = np.array([1, 1])  # avance tout droit (valeur stable)
+
+            # If the distance to the home position is less than 0.5 mm, stop the simulation
+            if dist <= 0.1:
+                self.quit = True
+                self.history.append(self.position.copy())
+                data = np.array(self.history)
+                self.line.set_data(data[:, 0], data[:, 1])
+                self.ax.relim()
+                self.ax.autoscale_view()
+                self.fig.canvas.draw()
+                self.fig.canvas.flush_events()
+                print("Retour au nid terminé.")
+                
+            joints, adhesion = step_cpg(
+                cpg_network=self.cpg_network,
+                preprogrammed_steps=self.preprogrammed_steps,
+                action=action,
+            )
+
+            self.step_count += 1
+            if self.step_count % self.plot_interval == 0:
+                self.history.append(self.position.copy())
+                data = np.array(self.history)
+                self.line.set_data(data[:, 0], data[:, 1])
+                self.ax.relim()
+                self.ax.autoscale_view()
+                self.fig.canvas.draw()
+                self.fig.canvas.flush_events()
+
+            return {"joints": joints, "adhesion": adhesion}
 
         # --- Logique CPG (odor, vision, threat) ---
         
@@ -404,14 +484,6 @@ class Controller(BaseController):
             preprogrammed_steps=self.preprogrammed_steps,
             action=action,
         )
-
-        # Récupérer vélocité relative et cap
-        v_rel = obs.get("velocity", np.zeros(2))
-        heading = obs.get("heading", self.heading)
-
-        # Mise à jour de la position
-        self.position = self.integrate_position(self.position, v_rel, heading, self.dt)
-        self.heading = heading
 
         # Incrémenter le compteur et tracer tous les plot_interval pas
         self.step_count += 1
@@ -455,3 +527,6 @@ class Controller(BaseController):
         self.line.set_data([], [])
         self.ax.relim()
         self.ax.autoscale_view()
+        self.returning_home = False
+        self.angle_error_prev = 0.0
+        self.dist_error_prev  = 0.0

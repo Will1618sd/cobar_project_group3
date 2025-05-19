@@ -22,7 +22,6 @@ def run_simulation(
 ):
     sys.path.append(str(submission_dir.parent))
     module = importlib.import_module(submission_dir.name)
-    controller = module.controller.Controller()
     timestep = 1e-4
 
     fly = CobarFly(
@@ -30,6 +29,8 @@ def run_simulation(
         enable_vision=True,
         render_raw_vision=True,
     )
+    
+    controller = module.controller.Controller(fly=fly)
 
     if level <= -1:
         level_arena = FlatTerrain()
