@@ -408,21 +408,25 @@ class Controller(BaseController):
             # Calculate the distance to the home position
             dist = np.linalg.norm(to_home)
 
-            print(f"[Homing] Distance to home: {dist:.2f}, Heading error: {np.rad2deg(err):.2f}°")
+            if vision_updated:
+                print(f"[Homing] Distance to home: {dist:.2f}, Heading error: {np.rad2deg(err):.2f}°")
 
             # Implementation of the bang bang control
             # If the heading error is greater than 5 degrees, hard coding of a left or right turn to face the home position
             # else advance straight ahead
-            if np.abs(err) > np.deg2rad(5):
+            if np.abs(err) > np.deg2rad(45):
                 if err > 0:
                     action = np.array([-1.0, 1.0])  # tourner à gauche
                 else:
                     action = np.array([1.0, -1.0])  # tourner à droite
             else:
-                action = np.array([1, 1])  # avance tout droit (valeur stable)
+                speed = np.tanh(dist/10)
+                turning_bias = np.tanh(err/(np.pi/2) * speed) # > 0 -> tourner à gauche
+                print(f"Turning bias : {turning_bias}")
+                action = np.array(np.clip([speed-turning_bias, speed+turning_bias], 0, 1))  # avance tout droit (valeur stable)
 
             # If the distance to the home position is less than 0.5 mm, stop the simulation
-            if dist <= 0.1:
+            if dist <= 0.5:
                 self.quit = True
                 self.history.append(self.position.copy())
                 data = np.array(self.history)
