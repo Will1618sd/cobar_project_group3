@@ -166,11 +166,17 @@ class Controller(BaseController):
                 pale_left_1 = self.vision_memory_pos[-1][1]
                 yellow_right_1 = self.vision_memory_pos[-1][2]
                 pale_right_1 = self.vision_memory_pos[-1][3]
+
+                dark_left_1 = self.vision_memory_pos[-1][4]
+                dark_right_1 = self.vision_memory_pos[-1][5]
                 # First derivatives (velocity)
-                yellow_left_velocity = (yellow_left - yellow_left_1) / self.dt
-                pale_left_velocity = (pale_left - pale_left_1) / self.dt
-                yellow_right_velocity = (yellow_right - yellow_right_1) / self.dt
-                pale_right_velocity = (pale_right - pale_right_1) / self.dt
+                yellow_left_velocity = round((yellow_left - yellow_left_1) / self.dt, 1)
+                pale_left_velocity = round((pale_left - pale_left_1) / self.dt, 1)
+                yellow_right_velocity = round((yellow_right - yellow_right_1) / self.dt, 1)
+                pale_right_velocity = round((pale_right - pale_right_1) / self.dt, 1)
+
+                dark_left_velocity = round((dark_left - dark_left_1) / self.dt)
+                dark_right_velocity = round((dark_right - dark_right_1) / self.dt)
 
             
             # Mean pixels looming (second derivative)
@@ -181,16 +187,33 @@ class Controller(BaseController):
                 yellow_right_velocity_1 = self.vision_memory_vel[-1][2]
                 pale_right_velocity_1 = self.vision_memory_vel[-1][3]
 
-                yellow_left_velocity = alpha*yellow_left_velocity + (1-alpha)*yellow_left_velocity_1
-                pale_left_velocity = alpha*pale_left_velocity + (1-alpha)*pale_left_velocity_1
-                yellow_right_velocity = alpha*yellow_right_velocity + (1-alpha)*yellow_right_velocity_1
-                pale_right_velocity = alpha*pale_right_velocity + (1-alpha)*pale_right_velocity_1
+                dark_left_velocity_1 = self.vision_memory_vel[-1][4]
+                dark_right_velocity_1 = self.vision_memory_vel[-1][5]
+
+                # yellow_left_velocity = round(alpha*yellow_left_velocity + (1-alpha)*yellow_left_velocity_1, 2)
+                # pale_left_velocity = round(alpha*pale_left_velocity + (1-alpha)*pale_left_velocity_1, 2)
+                # yellow_right_velocity = round(alpha*yellow_right_velocity + (1-alpha)*yellow_right_velocity_1, 2)
+                # pale_right_velocity = round(alpha*pale_right_velocity + (1-alpha)*pale_right_velocity_1, 2)
+
+                # dark_left_velocity = round(alpha*dark_left_velocity + (1-alpha)*dark_left_velocity_1)
+                # dark_right_velocity = round(alpha*dark_right_velocity + (1-alpha)*dark_right_velocity_1)
+
+                yellow_left_velocity = round(yellow_left_velocity, 2)
+                pale_left_velocity = round(pale_left_velocity, 2)
+                yellow_right_velocity = round(yellow_right_velocity, 2)
+                pale_right_velocity = round(pale_right_velocity, 2)
+
+                dark_left_velocity = round(dark_left_velocity)
+                dark_right_velocity = round(dark_right_velocity)
                 
                 # Second derivatives (acceleration)
-                yellow_left_acceleration = (yellow_left_velocity - yellow_left_velocity_1) / self.dt
-                pale_left_acceleration = (pale_left_velocity - pale_left_velocity_1) / self.dt
-                yellow_right_acceleration = (yellow_right_velocity - yellow_right_velocity_1) / self.dt
-                pale_right_acceleration = (pale_right_velocity - pale_right_velocity_1) / self.dt
+                yellow_left_acceleration = round((yellow_left_velocity - yellow_left_velocity_1) / self.dt, 1)
+                pale_left_acceleration = round((pale_left_velocity - pale_left_velocity_1) / self.dt, 1)
+                yellow_right_acceleration = round((yellow_right_velocity - yellow_right_velocity_1) / self.dt, 1)
+                pale_right_acceleration = round((pale_right_velocity - pale_right_velocity_1) / self.dt, 1)
+
+                dark_left_acceleration = round((dark_left_velocity - dark_left_velocity_1) / self.dt)
+                dark_right_acceleration = round((dark_right_velocity - dark_right_velocity_1) / self.dt)
             
             if len(self.vision_memory_acc) >= 1: 
                 # Filtering
@@ -199,10 +222,24 @@ class Controller(BaseController):
                 yellow_right_acceleration_1 = self.vision_memory_acc[-1][2]
                 pale_right_acceleration_1 = self.vision_memory_acc[-1][3]
 
-                yellow_left_acceleration = alpha*yellow_left_acceleration + (1-alpha)*yellow_left_acceleration_1
-                pale_left_acceleration = alpha*pale_left_acceleration + (1-alpha)*pale_left_acceleration_1
-                yellow_right_acceleration = alpha*yellow_right_acceleration + (1-alpha)*yellow_right_acceleration_1
-                pale_right_acceleration = alpha*pale_right_acceleration + (1-alpha)*pale_right_acceleration_1
+                dark_left_acceleration_1 = self.vision_memory_acc[-1][4]
+                dark_right_acceleration_1 = self.vision_memory_acc[-1][5]
+
+                # yellow_left_acceleration = round(alpha*yellow_left_acceleration + (1-alpha)*yellow_left_acceleration_1)
+                # pale_left_acceleration = round(alpha*pale_left_acceleration + (1-alpha)*pale_left_acceleration_1)
+                # yellow_right_acceleration = round(alpha*yellow_right_acceleration + (1-alpha)*yellow_right_acceleration_1)
+                # pale_right_acceleration = round(alpha*pale_right_acceleration + (1-alpha)*pale_right_acceleration_1)
+
+                # dark_left_acceleration = round(alpha*dark_left_acceleration + (1-alpha)*dark_left_acceleration_1)
+                # dark_right_acceleration = round(alpha*dark_right_acceleration + (1-alpha)*dark_right_acceleration_1)
+
+                yellow_left_acceleration = round(yellow_left_acceleration )
+                pale_left_acceleration = round(pale_left_acceleration)
+                yellow_right_acceleration = round(yellow_right_acceleration)
+                pale_right_acceleration = round(pale_right_acceleration)
+
+                dark_left_acceleration = round(dark_left_acceleration)
+                dark_right_acceleration = round(dark_right_acceleration)
 
                 
             # Normal vision response
@@ -213,8 +250,8 @@ class Controller(BaseController):
             mean_obstacle = fly_vision.mean() # lower == obstacles, few obstacles -> 0.48-0.59, no obstacle -> 0.50
 
             vision_speed = np.tanh((mean_obstacle-0.4)/(0.5-0.4))*3/4 +1/4 # function to keep high speed for x < soft threshold, but low speed after
-            turning_bias = np.tanh((75*mean_gradient)**3) # function to turn little when medium/low but turn way more when bigger
-            turning_bias = np.tanh(turning_bias - (dark_left-dark_right)/10)
+            gradient_bias = np.tanh((100*mean_gradient)**3) # function to turn little when medium/low but turn way more when bigger
+            turning_bias = np.tanh(gradient_bias - (dark_left-dark_right)/10)
 
             vision_response = [vision_speed, turning_bias]
 
@@ -223,40 +260,47 @@ class Controller(BaseController):
                 left_eye_change = (yellow_left_velocity + pale_left_velocity)/2 # obstacle approaching -> velocity < 0
                 right_eye_change = (yellow_right_velocity + pale_right_velocity)/2
                 change_gradient = left_eye_change - right_eye_change # if right obstacle approaching -> gradient > 0 -> turn left
-                turning_bias += change_gradient/10
+                turning_bias += np.tanh(change_gradient/50)
 
 
-            # Append to memory + deletion
-            self.vision_memory_pos.append([yellow_left, pale_left, yellow_right, pale_right]) 
-            if len(self.vision_memory_pos) > 3:
-                self.vision_memory_pos.pop(0)
+            vision_updated = obs.get("vision_updated", False)
+            if vision_updated:
+                # Append to memory + deletion
+                self.vision_memory_pos.append([yellow_left, pale_left, yellow_right, pale_right, dark_left, dark_right]) 
+                if len(self.vision_memory_pos) > 3:
+                    self.vision_memory_pos.pop(0)
 
-            if len(self.vision_memory_pos) >= 2:
-                self.vision_memory_vel.append([yellow_left_velocity, pale_left_velocity, yellow_right_velocity, pale_right_velocity])
-            if len(self.vision_memory_vel) > 2:
-                self.vision_memory_vel.pop(0)
+                if len(self.vision_memory_pos) >= 2:
+                    self.vision_memory_vel.append([yellow_left_velocity, pale_left_velocity, yellow_right_velocity, pale_right_velocity, dark_left_velocity, dark_right_velocity])
+                if len(self.vision_memory_vel) > 2:
+                    self.vision_memory_vel.pop(0)
 
-            if len(self.vision_memory_vel) >= 2:
-                self.vision_memory_acc.append([yellow_left_acceleration, pale_left_acceleration, yellow_right_acceleration, pale_right_acceleration])
-            if len(self.vision_memory_acc) > 3:
-                self.vision_memory_acc.pop(0)
+                if len(self.vision_memory_vel) >= 2:
+                    self.vision_memory_acc.append([yellow_left_acceleration, pale_left_acceleration, yellow_right_acceleration, pale_right_acceleration, dark_left_acceleration, dark_right_acceleration])
+                if len(self.vision_memory_acc) > 3:
+                    self.vision_memory_acc.pop(0)
 
             # Print if needed
             # vision_updated = obs.get("vision_updated", False)
             # if vision_updated and len(self.vision_memory_vel) >= 2:
-            #     print(f"Count nb of dark pixels : left : {dark_left}, right : {dark_right}")
-            #     print(f"\nMean vision : both : {mean_obstacle}, left : {left_eye.mean()}, right : {right_eye.mean()}")
-            #     print(f"Position gradient : {mean_gradient}")
-            #     print(f"Position : left - yellow : {yellow_left}, left - pale : {pale_left}, right - yellow : {yellow_right}, right - pale : {pale_right}")
-            #     print(f"Velocity : left - yellow : {yellow_left_velocity}, left - pale : {pale_left_velocity}, right - yellow : {yellow_right_velocity}, right - pale : {pale_right_velocity}")
-            #     print(f"Acceleration : left - yellow : {yellow_left_acceleration}, left - pale : {pale_left_acceleration}, right - yellow : {yellow_right_acceleration}, right - pale : {pale_right_acceleration}")
+                # print(f"Count nb of dark pixels : left : {dark_left}, right : {dark_right}")
+                # print(f"\nMean vision : both : {mean_obstacle}, left : {left_eye.mean()}, right : {right_eye.mean()}")
+                # print(f"Position gradient : {mean_gradient}")
+                # print(f"Position : left - yellow : {yellow_left}, left - pale : {pale_left}, right - yellow : {yellow_right}, right - pale : {pale_right}")
+                # print(f"Velocity : left - yellow : {yellow_left_velocity}, left - pale : {pale_left_velocity}, right - yellow : {yellow_right_velocity}, right - pale : {pale_right_velocity}")
+                # print(f"Gradient bias : {gradient_bias}, Velocity gradient : {change_gradient}")
+                # print(f"Acceleration : left - yellow : {yellow_left_acceleration}, left - pale : {pale_left_acceleration}, right - yellow : {yellow_right_acceleration}, right - pale : {pale_right_acceleration}")
+                # print(f"Dark left  : pos : {dark_left}, vel : {dark_left_velocity}, acc : {dark_left_acceleration}")
+                # print(f"Dark right : pos : {dark_right}, vel : {dark_right_velocity}, acc : {dark_right_acceleration}")
 
             return vision_response
 
 
     def get_threat_response(self, obs: Observation):
-        threat_threshold = -10000
-        action = np.array([0, 0])
+        threat_threshold = -100000 # if mean of last 3 obs < threshold -> ball looming (for pale ommatidia)
+        threat_left = False
+        threat_right = False
+        action = [0, 0]
 
         if len(self.vision_memory_acc) >= 1:
             yellow_left_looming = self.vision_memory_acc[-1][0]
@@ -264,23 +308,40 @@ class Controller(BaseController):
             yellow_right_looming = self.vision_memory_acc[-1][2]
             pale_right_looming = self.vision_memory_acc[-1][3]
 
-            left_looming = np.mean([[vec[0] for vec in self.vision_memory_acc],[vec[1] for vec in self.vision_memory_acc]])
-            right_looming = np.mean([[vec[2] for vec in self.vision_memory_acc],[vec[3] for vec in self.vision_memory_acc]])
+            looming = np.array(self.vision_memory_acc)
+            changing = np.array(self.vision_memory_vel)
 
-            if left_looming > right_looming: # Priority on left threat
-                if left_looming < threat_threshold:
-                    # Fast going back for right legs
-                    action = np.array([-1, -1])
+            # left and right looming with pale ommatidia
+            left_looming = np.mean(looming[-2:, 1])
+            right_looming = np.mean(looming[-2:, 3])
 
-            else: # Priority on right threat
-                if right_looming < threat_threshold:
-                    # Fast going back for left legs
-                    action = np.array([-1, -1])
+            # continuous_left_looming = np.all(looming[:, 1] < threat_threshold / 100)
+            # continuous_right_looming = np.all(looming[:, 3] < threat_threshold / 100)
+
+            continuous_left_looming = np.all(changing[-2:, 4] >= 10000)
+            continuous_right_looming = np.all(changing[-2:, 5] >= 10000)
+
+
+            if left_looming < threat_threshold and continuous_left_looming:
+                threat_left = True
+                action = [-1, 0]
+            
+            if right_looming < threat_threshold and continuous_right_looming:
+                threat_right = True
+                action = [-1, 0]
+                
 
             vision_updated = obs.get("vision_updated", False)
             if vision_updated:
-                print(f"Looming : yellow - left : {yellow_left_looming}, right : {yellow_right_looming}")
-                print(f"Looming : pale - left : {pale_left_looming}, right : {pale_right_looming}")
+                # print(f"Looming : yellow - left : {yellow_left_looming}, right : {yellow_right_looming}")
+                # print(f"Looming : pale - left : {pale_left_looming}, right : {pale_right_looming}")
+                # print(f"Right looming : {looming[:, 3]}")
+                # print(f"Continuous looming : left : {continuous_left_looming}, right : {continuous_right_looming}")
+                if threat_left:
+                    print(f"Threat on the left")
+                    
+                if threat_right:
+                    print(f"Threat on the right")
         
         return action
 
@@ -325,15 +386,18 @@ class Controller(BaseController):
         speed = weight_speed*vision_action[0] + (1-weight_speed)*odor_action[0]
         turning = weight_turning*vision_action[1] + (1-weight_turning)*odor_action[1]
 
+        if threat_action != [0, 0]:
+            speed, turning = threat_action
+
         action = np.array([speed-turning/2, speed+turning/2])
         action = np.clip(action, -1, 1)
 
         # vision_updated = obs.get("vision_updated", False)
         # if vision_updated:
-        #     print(f"Odor : speed : {odor_action[0]}, turning : {odor_action[1]}")
+        #     print(f"Odor   : speed : {odor_action[0]}, turning : {odor_action[1]}")
         #     print(f"Vision : speed : {vision_action[0]}, turning : {vision_action[1]}")
         #     print(f"Action : speed : {speed}, turning : {turning}")
-        #     print(f"Action : left : {action[0]}, right : {action[1]}")
+        #     print(f"Action : left  : {action[0]}, right : {action[1]}")
 
         joint_angles, adhesion = step_cpg(
             cpg_network=self.cpg_network,
