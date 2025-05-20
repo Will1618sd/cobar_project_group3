@@ -23,14 +23,14 @@ def run_simulation(
     sys.path.append(str(submission_dir.parent))
     module = importlib.import_module(submission_dir.name)
     timestep = 1e-4
+    controller = module.controller.Controller()
 
     fly = CobarFly(
         debug=debug,
         enable_vision=True,
         render_raw_vision=True,
     )
-    
-    controller = module.controller.Controller(fly=fly)
+
 
     if level <= -1:
         level_arena = FlatTerrain()
@@ -86,6 +86,9 @@ def run_simulation(
                 del obs_["vision"]
             if "raw_vision" in obs_:
                 del obs_["raw_vision"]
+        if "raw_vision" in info:
+            del info["raw_vision"]
+
         obs_hist.append(obs_)
         info_hist.append(info)
 

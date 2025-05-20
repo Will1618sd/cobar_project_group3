@@ -9,7 +9,6 @@ class Controller(BaseController):
         self,
         timestep=1e-4,
         seed=0,
-        fly=None,
     ):
         from flygym.examples.locomotion import PreprogrammedSteps
 
@@ -51,8 +50,6 @@ class Controller(BaseController):
         # Homing behavior
         self.home_position = self.position.copy()
         self.returning_home = False
-
-        self.fly = fly
     
     @staticmethod
     def integrate_position(prev_pos: np.ndarray, v_rel: np.ndarray, heading: float, dt: float) -> np.ndarray:
@@ -397,8 +394,6 @@ class Controller(BaseController):
 
         if self.returning_home:
             # Desactivation of the vision (to save memory)
-            if self.fly is not None:
-                self.fly.get_info = lambda: {"raw_vision": None}
             # Homing vector calculation
             to_home = self.home_position - self.position
             # Calculation of the heading angle to the home position
@@ -414,16 +409,18 @@ class Controller(BaseController):
             # Implementation of the bang bang control
             # If the heading error is greater than 5 degrees, hard coding of a left or right turn to face the home position
             # else advance straight ahead
-            if np.abs(err) > np.deg2rad(45):
+            if np.abs(err) > np.deg2rad(5):
                 if err > 0:
                     action = np.array([-1.0, 1.0])  # tourner à gauche
                 else:
                     action = np.array([1.0, -1.0])  # tourner à droite
             else:
-                speed = np.tanh(dist/10)
-                turning_bias = np.tanh(err/(np.pi/2) * speed) # > 0 -> tourner à gauche
-                print(f"Turning bias : {turning_bias}")
-                action = np.array(np.clip([speed-turning_bias, speed+turning_bias], 0, 1))  # avance tout droit (valeur stable)
+
+                # Heading correction
+                turning_bias = np.tanh(err / (np.pi / 2)) * np.tanh(dist / 10)  # ajustable
+
+                # Compose action
+                action = np.clip([1 - turning_bias, 1 + turning_bias], 0, 1)
 
             # If the distance to the home position is less than 0.5 mm, stop the simulation
             if dist <= 0.5:
