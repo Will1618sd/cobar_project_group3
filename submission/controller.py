@@ -145,6 +145,10 @@ class Controller(BaseController):
             else: # Not enough memories
                 odor_speed = 0.5
                 action = [odor_speed, turning_bias]
+
+            if len(self.odor_memory_pos) >= 2:
+                if odor_intensity_velocity < 0:
+                    action = [0.55, 0.9*np.tanh(turning_bias*100)]
             
 
             # Olfactive memory
@@ -285,7 +289,7 @@ class Controller(BaseController):
 
             vision_speed = np.tanh((mean_obstacle-0.4)/(0.5-0.4))*3/4 +1/4 # function to keep high speed for x < soft threshold, but low speed after
             gradient_bias = np.tanh((100*mean_gradient)**3) # function to turn little when medium/low but turn way more when bigger
-            turning_bias = np.tanh(gradient_bias - (dark_left-dark_right)/10)
+            turning_bias = np.tanh(gradient_bias - (dark_left-dark_right)/5)
 
             vision_response = [vision_speed, turning_bias]
 
@@ -470,12 +474,12 @@ class Controller(BaseController):
         action = np.array([speed-turning/2, speed+turning/2])
         action = np.clip(action, -1, 1)
 
-        # vision_updated = obs.get("vision_updated", False)
-        # if vision_updated:
-        #     print(f"Odor   : speed : {odor_action[0]}, turning : {odor_action[1]}")
-        #     print(f"Vision : speed : {vision_action[0]}, turning : {vision_action[1]}")
-        #     print(f"Action : speed : {speed}, turning : {turning}")
-        #     print(f"Action : left  : {action[0]}, right : {action[1]}")
+        vision_updated = obs.get("vision_updated", False)
+        if vision_updated:
+            print(f"Odor   : speed : {odor_action[0]}, turning : {odor_action[1]}")
+            print(f"Vision : speed : {vision_action[0]}, turning : {vision_action[1]}")
+            # print(f"Action : speed : {speed}, turning : {turning}")
+            # print(f"Action : left  : {action[0]}, right : {action[1]}")
 
         joint_angles, adhesion = step_cpg(
             cpg_network=self.cpg_network,
