@@ -420,10 +420,9 @@ class Controller(BaseController):
                 else:
                     action = np.array([1.0, -1.0])  # tourner à droite
             else:
-                speed = np.tanh(dist/10)
-                turning_bias = np.tanh(err/(np.pi/2) * speed) # > 0 -> tourner à gauche
+                turning_bias = np.tanh(err/(np.pi/2) * np.tanh(dist/10)) # > 0 -> tourner à gauche
                 print(f"Turning bias : {turning_bias}")
-                action = np.array(np.clip([speed-turning_bias, speed+turning_bias], 0, 1))  # avance tout droit (valeur stable)
+                action = np.array(np.clip([1-turning_bias, 1+turning_bias], 0, 1))  # avance tout droit (valeur stable)
 
             # If the distance to the home position is less than 0.5 mm, stop the simulation
             if dist <= 0.5:
