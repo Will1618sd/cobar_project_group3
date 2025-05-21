@@ -35,7 +35,6 @@ class Controller(BaseController):
         # Step counter for downsampling plot
         self.step_count = 0
         self.plot_interval = 300      # plot every N steps
-        self.history = [self.position.copy()]
 
         # Initialisation du plot en mode interactif
         plt.ion()
@@ -50,6 +49,10 @@ class Controller(BaseController):
         # Homing behavior
         self.home_position = self.position.copy()
         self.returning_home = False
+
+        self.stuck_counter = 0
+        self.stuck_threshold = 1000  # Number of steps to consider as stuck
+        self.recovery_steps = 0
     
     @staticmethod
     def integrate_position(prev_pos: np.ndarray, v_rel: np.ndarray, heading: float, dt: float) -> np.ndarray:
@@ -424,7 +427,7 @@ class Controller(BaseController):
                 action = np.array(np.clip([1-turning_bias, 1+turning_bias], 0, 1))  # avance tout droit (valeur stable)
 
             # If the distance to the home position is less than 0.5 mm, stop the simulation
-            if dist <= 0.5:
+            if dist <= 1:
                 self.quit = True
                 self.history.append(self.position.copy())
                 data = np.array(self.history)
@@ -454,6 +457,37 @@ class Controller(BaseController):
             return {"joints": joints, "adhesion": adhesion}
 
         # --- Logique CPG (odor, vision, threat) ---
+
+        delta = np.linalg.norm(self.history[-1] - self.position)
+        if delta < 0.05:
+            self.stuck_counter += 1
+        else:
+            self.stuck_counter = 0
+
+        if self.stuck_counter >= self.stuck_threshold:
+            self.stuck_counter = 0
+            self.recovery_steps = 1000
+
+        if getattr(self, "recovery_steps", 0) > 0:
+            action = np.array([-1.0, -1.0])  # recul plein gaz
+            self.recovery_steps -= 1
+
+            joints, adhesion = step_cpg(
+                cpg_network=self.cpg_network,
+                preprogrammed_steps=self.preprogrammed_steps,
+                action=action,
+            )
+            self.step_count += 1
+            if self.step_count % self.plot_interval == 0:
+                self.history.append(self.position.copy())
+                data = np.array(self.history)
+                self.line.set_data(data[:, 0], data[:, 1])
+                self.ax.relim()
+                self.ax.autoscale_view()
+                self.fig.canvas.draw()
+                self.fig.canvas.flush_events()
+            return {"joints": joints, "adhesion": adhesion}
+            
         
         odor_action   = self.get_odor_bias(obs)
         vision_action = self.get_vision_bias(obs)
