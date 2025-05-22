@@ -22,30 +22,36 @@ class Controller(BaseController):
         self.vision_memory_vel = []
         self.vision_memory_acc = []
 
-        self.position = np.zeros(2)     # position initiale [x, y]
-        self.heading  = 0.0             # cap initial (en radians)
-        self.dt       = timestep        # même pas de temps que le CPG
+        self.position = np.zeros(2)
+        self.heading  = 0.0 
+        self.dt       = timestep 
         self.history = [self.position.copy()]
-        self.vel_buffer = []        # buffer pour stocker les dernières vitesses
-        self.buffer_size = 1000        # taille de la fenêtre (à ajuster)
-        self.heading_buffer      = []
-        self.heading_buffer_size = 1000
+        self.vel_buffer = []
+        self.buffer_size = 500
+        self.heading_buffer = []
+        self.heading_buffer_size = 500
         self.alpha = 0.7
 
         # Step counter for downsampling plot
         self.step_count = 0
         self.plot_interval = 300      # plot every N steps
 
-        # Initialisation du plot en mode interactif
+        # Initialisation of the plot
         plt.ion()
         self.fig, self.ax = plt.subplots()
         (self.line_est,)  = self.ax.plot([], [], "-o", label="Estimation")
-        (self.line_real,) = self.ax.plot([], [], "-x", label="Réel")
+        (self.line_real,) = self.ax.plot([], [], "-x", label="Real")
         self.real_history = []
-        self.ax.legend()
+        self.ax.legend(
+            loc="upper left",
+            bbox_to_anchor=(1.05, 1),
+            borderaxespad=0.0,
+            frameon=False,
+        )
+        self.fig.tight_layout()
         self.ax.set_xlabel('X (mm)')
         self.ax.set_ylabel('Y (mm)')
-        self.ax.set_title('Trajectoire de la mouche')
+        self.ax.set_title('Real vs Estimated Fly Path')
         self.ax.grid(True)
         self.ax.set_aspect('equal', adjustable='box')
 
@@ -68,7 +74,7 @@ class Controller(BaseController):
         return prev_pos + v_world * dt
     
     def filter_velocity(self, obs: Observation) -> np.ndarray:
-        # --- Filtrage passe-bas sur la vitesse ---
+        # Low-pass filter on the velocity
         v_rel = obs.get("velocity", np.zeros(2))
         self.vel_buffer.append(v_rel)
         if len(self.vel_buffer) > self.buffer_size:
@@ -76,7 +82,7 @@ class Controller(BaseController):
         return np.mean(self.vel_buffer, axis=0)
 
     def filter_heading(self, obs: Observation) -> float:
-        # --- Filtrage passe-bas (moyenne circulaire) sur le cap ---
+        # Low-pass filter on the heading
         raw_h = obs.get("heading", self.heading)
         self.heading_buffer.append(raw_h)
         if len(self.heading_buffer) > self.heading_buffer_size:
@@ -87,15 +93,28 @@ class Controller(BaseController):
         return np.arctan2(sin_avg, cos_avg)
 
     def update_position_filters(self, v_filt: np.ndarray, h_filt: float):
-        # --- Intégration de la position avec filtres ---
+        # Update the position and heading based on the filters
         self.position = self.integrate_position(self.position, v_filt, h_filt, self.dt)
         self.heading  = h_filt
     
-    def get_cpg_inputs(self, obs: Observation):
-        odor_action   = self.get_odor_bias(obs)
-        vision_action = self.get_vision_bias(obs)
-        threat_action = self.get_threat_response(obs)
-        return odor_action, vision_action, threat_action
+    def _update_plot(self, obs):
+        # Estimated position
+        self.history.append(self.position.copy())
+        data_est = np.asarray(self.history)
+        self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+
+        # Real position
+        real = obs.get("debug_fly")
+        if real is not None:
+            self.real_history.append(real[0, :2].copy())
+            data_real = np.asarray(self.real_history)
+            self.line_real.set_data(data_real[:, 0], data_real[:, 1])
+
+        # Update plot limits
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
 
     def get_odor_bias(self, obs: Observation):
         odor_intensity = obs.get("odor_intensity", None)
@@ -390,19 +409,13 @@ class Controller(BaseController):
         
         return action
 
-    
-
     def get_actions(self, obs: Observation):
         vision_updated = obs.get("vision_updated", False)
 
+        # Update the position and heading filters
         v_filt = self.filter_velocity(obs)
         h_filt = self.filter_heading(obs)
         self.update_position_filters(v_filt, h_filt)
-
-
-        if "debug_fly" in obs and self.step_count % self.plot_interval == 0:
-            x, y, z = obs["debug_fly"][0]        # ← ligne 0 du tableau
-            print(f"[REAL POS] x = {x:7.2f}  y = {y:7.2f}  z = {z:6.2f} mm", flush=True)
 
         # Check homing condition
         if obs.get("reached_odour", False):
@@ -427,32 +440,18 @@ class Controller(BaseController):
             # else advance straight ahead
             if np.abs(err) > np.deg2rad(45):
                 if err > 0:
-                    action = np.array([-1.0, 1.0])  # tourner à gauche
+                    action = np.array([-1.0, 1.0])  # turn left
                 else:
-                    action = np.array([1.0, -1.0])  # tourner à droite
+                    action = np.array([1.0, -1.0])  # turn right
             else:
-                turning_bias = np.tanh(err/(np.pi/4)) # > 0 -> tourner à gauche
-                action = np.array(np.clip([1-turning_bias, 1+turning_bias], 0, 1))  # avance tout droit (valeur stable)
+                turning_bias = np.tanh(err/(np.pi/4)) # tanh function to limit the turning bias
+                action = np.array(np.clip([1-turning_bias, 1+turning_bias], 0, 1))
 
             # If the distance to the home position is less than 0.5 mm, stop the simulation
             if dist <= 1:
                 self.quit = True
-                self.history.append(self.position.copy())
-                data_est = np.asarray(self.history)
-                self.line_est.set_data(data_est[:, 0], data_est[:, 1])
-
-                # Trajectoire réelle
-                real = obs.get("debug_fly")
-                if real is not None:
-                    self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
-                    data_real = np.asarray(self.real_history)
-                    self.line_real.set_data(data_real[:, 0], data_real[:, 1])
-
-                self.ax.relim()
-                self.ax.autoscale_view()
-                self.fig.canvas.draw()
-                self.fig.canvas.flush_events()
-                print("Retour au nid terminé.")
+                self._update_plot(obs)
+                print("Nest return completed.")
                 
             joints, adhesion = step_cpg(
                 cpg_network=self.cpg_network,
@@ -462,22 +461,7 @@ class Controller(BaseController):
 
             self.step_count += 1
             if self.step_count % self.plot_interval == 0:
-                self.history.append(self.position.copy())
-                data_est = np.asarray(self.history)
-                self.line_est.set_data(data_est[:, 0], data_est[:, 1])
-
-                # Trajectoire réelle
-                real = obs.get("debug_fly")
-                if real is not None:
-                    self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
-                    data_real = np.asarray(self.real_history)
-                    self.line_real.set_data(data_real[:, 0], data_real[:, 1])
-
-                self.ax.relim()
-                self.ax.autoscale_view()
-                self.fig.canvas.draw()
-                self.fig.canvas.flush_events()
-
+                self._update_plot(obs)
             return {"joints": joints, "adhesion": adhesion}
 
         # --- Logique CPG (odor, vision, threat) ---
@@ -499,7 +483,7 @@ class Controller(BaseController):
             self.recovery_steps = 2000
 
         if getattr(self, "recovery_steps", 0) > 0:
-            action = np.array(np.clip([-1.0+odor_grad/2, -1.0-odor_grad/2], -1, 0))  # recul plein gaz
+            action = np.array(np.clip([-1.0+odor_grad/2, -1.0-odor_grad/2], -1, 0))
             self.recovery_steps -= 1
 
             joints, adhesion = step_cpg(
@@ -509,21 +493,7 @@ class Controller(BaseController):
             )
             self.step_count += 1
             if self.step_count % self.plot_interval == 0:
-                self.history.append(self.position.copy())
-                data_est = np.asarray(self.history)
-                self.line_est.set_data(data_est[:, 0], data_est[:, 1])
-
-                # Trajectoire réelle
-                real = obs.get("debug_fly")
-                if real is not None:
-                    self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
-                    data_real = np.asarray(self.real_history)
-                    self.line_real.set_data(data_real[:, 0], data_real[:, 1])
-
-                self.ax.relim()
-                self.ax.autoscale_view()
-                self.fig.canvas.draw()
-                self.fig.canvas.flush_events()
+                self._update_plot(obs)
             return {"joints": joints, "adhesion": adhesion}
             
         
@@ -555,53 +525,26 @@ class Controller(BaseController):
             action=action,
         )
 
-        # Incrémenter le compteur et tracer tous les plot_interval pas
         self.step_count += 1
         if self.step_count % self.plot_interval == 0:
-            self.history.append(self.position.copy())
-            data_est = np.asarray(self.history)
-            self.line_est.set_data(data_est[:, 0], data_est[:, 1])
-
-            # Trajectoire réelle
-            real = obs.get("debug_fly")
-            if real is not None:
-                self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
-                data_real = np.asarray(self.real_history)
-                self.line_real.set_data(data_real[:, 0], data_real[:, 1])
-
-            self.ax.relim()
-            self.ax.autoscale_view()
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
+            self._update_plot(obs)
         return {
             "joints": joint_angles,
             "adhesion": adhesion,
         }
 
     def done_level(self, obs: Observation, seed=0, level=4) -> bool:
-        # Lorsque la simulation se termine, enregistrer le graphique
         if self.quit:
-            self.history.append(self.position.copy())
-            data_est = np.asarray(self.history)
-            self.line_est.set_data(data_est[:, 0], data_est[:, 1])
-
-            # Trajectoire réelle
-            real = obs.get("debug_fly")
-            if real is not None:
-                self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
-                data_real = np.asarray(self.real_history)
-                self.line_real.set_data(data_real[:, 0], data_real[:, 1])
-
-            self.ax.relim()
-            self.ax.autoscale_view()
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
-
+            self._update_plot(obs)
             import os
             save_dir = os.getcwd()
             save_path = os.path.join(save_dir, f"outputs/trajectory_seed{seed}_level{level}.png")
             self.fig.savefig(save_path, dpi=300)
-            print(f"Graphique enregistré sous '{save_path}'.")
+            print(f"Graphic saved path: '{save_path}'.")
+            # Print the real final position of the fly
+            x, y, z = obs["debug_fly"][0]
+            print(f"[Real position of the fly:] x = {x:7.2f}  y = {y:7.2f}  z = {z:6.2f} mm", flush=True)
+            
         return self.quit
 
     def reset(self, **kwargs):
@@ -611,9 +554,7 @@ class Controller(BaseController):
         self.step_count = 0
         self.history = [self.position.copy()]
         self.real_history = []  
-         # estimation
         self.line_est.set_data([], [])
-        # réel
         self.line_real.set_data([], [])
         self.ax.relim()
         self.ax.autoscale_view()
