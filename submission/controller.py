@@ -39,12 +39,16 @@ class Controller(BaseController):
         # Initialisation du plot en mode interactif
         plt.ion()
         self.fig, self.ax = plt.subplots()
-        self.line, = self.ax.plot([], [], '-o')
+        (self.line_est,)  = self.ax.plot([], [], "-o", label="Estimation")
+        (self.line_real,) = self.ax.plot([], [], "-x", label="Réel")
+        self.real_history = []
+        self.ax.legend()
         self.ax.set_xlabel('X (mm)')
         self.ax.set_ylabel('Y (mm)')
         self.ax.set_title('Trajectoire de la mouche')
         self.ax.grid(True)
         self.ax.set_aspect('equal', adjustable='box')
+
 
         # Homing behavior
         self.home_position = self.position.copy()
@@ -395,6 +399,11 @@ class Controller(BaseController):
         h_filt = self.filter_heading(obs)
         self.update_position_filters(v_filt, h_filt)
 
+
+        if "debug_fly" in obs and self.step_count % self.plot_interval == 0:
+            x, y, z = obs["debug_fly"][0]        # ← ligne 0 du tableau
+            print(f"[REAL POS] x = {x:7.2f}  y = {y:7.2f}  z = {z:6.2f} mm", flush=True)
+
         # Check homing condition
         if obs.get("reached_odour", False):
             self.returning_home = True
@@ -429,8 +438,16 @@ class Controller(BaseController):
             if dist <= 1:
                 self.quit = True
                 self.history.append(self.position.copy())
-                data = np.array(self.history)
-                self.line.set_data(data[:, 0], data[:, 1])
+                data_est = np.asarray(self.history)
+                self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+
+                # Trajectoire réelle
+                real = obs.get("debug_fly")
+                if real is not None:
+                    self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
+                    data_real = np.asarray(self.real_history)
+                    self.line_real.set_data(data_real[:, 0], data_real[:, 1])
+
                 self.ax.relim()
                 self.ax.autoscale_view()
                 self.fig.canvas.draw()
@@ -446,8 +463,16 @@ class Controller(BaseController):
             self.step_count += 1
             if self.step_count % self.plot_interval == 0:
                 self.history.append(self.position.copy())
-                data = np.array(self.history)
-                self.line.set_data(data[:, 0], data[:, 1])
+                data_est = np.asarray(self.history)
+                self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+
+                # Trajectoire réelle
+                real = obs.get("debug_fly")
+                if real is not None:
+                    self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
+                    data_real = np.asarray(self.real_history)
+                    self.line_real.set_data(data_real[:, 0], data_real[:, 1])
+
                 self.ax.relim()
                 self.ax.autoscale_view()
                 self.fig.canvas.draw()
@@ -485,8 +510,16 @@ class Controller(BaseController):
             self.step_count += 1
             if self.step_count % self.plot_interval == 0:
                 self.history.append(self.position.copy())
-                data = np.array(self.history)
-                self.line.set_data(data[:, 0], data[:, 1])
+                data_est = np.asarray(self.history)
+                self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+
+                # Trajectoire réelle
+                real = obs.get("debug_fly")
+                if real is not None:
+                    self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
+                    data_real = np.asarray(self.real_history)
+                    self.line_real.set_data(data_real[:, 0], data_real[:, 1])
+
                 self.ax.relim()
                 self.ax.autoscale_view()
                 self.fig.canvas.draw()
@@ -526,8 +559,16 @@ class Controller(BaseController):
         self.step_count += 1
         if self.step_count % self.plot_interval == 0:
             self.history.append(self.position.copy())
-            data = np.array(self.history)
-            self.line.set_data(data[:, 0], data[:, 1])
+            data_est = np.asarray(self.history)
+            self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+
+            # Trajectoire réelle
+            real = obs.get("debug_fly")
+            if real is not None:
+                self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
+                data_real = np.asarray(self.real_history)
+                self.line_real.set_data(data_real[:, 0], data_real[:, 1])
+
             self.ax.relim()
             self.ax.autoscale_view()
             self.fig.canvas.draw()
@@ -541,12 +582,20 @@ class Controller(BaseController):
         # Lorsque la simulation se termine, enregistrer le graphique
         if self.quit:
             self.history.append(self.position.copy())
-            data = np.array(self.history)
-            self.line.set_data(data[:, 0], data[:, 1])
+            data_est = np.asarray(self.history)
+            self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+
+            # Trajectoire réelle
+            real = obs.get("debug_fly")
+            if real is not None:
+                self.real_history.append(real[0, :2].copy())     # seule la 1re ligne
+                data_real = np.asarray(self.real_history)
+                self.line_real.set_data(data_real[:, 0], data_real[:, 1])
+
             self.ax.relim()
             self.ax.autoscale_view()
-
             self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
 
             import os
             save_dir = os.getcwd()
@@ -561,7 +610,11 @@ class Controller(BaseController):
         self.heading = 0.0
         self.step_count = 0
         self.history = [self.position.copy()]
-        self.line.set_data([], [])
+        self.real_history = []  
+         # estimation
+        self.line_est.set_data([], [])
+        # réel
+        self.line_real.set_data([], [])
         self.ax.relim()
         self.ax.autoscale_view()
         self.returning_home = False
