@@ -78,7 +78,7 @@ if __name__ == "__main__":
             obs, reward, terminated, truncated, info = sim.step(
                 controller.get_actions(obs)
             )
-            if controller.done_level(obs):
+            if controller.done_level(obs, seed, level):
                 # finish the path integration level
                 break
 

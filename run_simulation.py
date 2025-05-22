@@ -76,7 +76,7 @@ def run_simulation(
         frame = sim.render()
         if frame[0] is not None:
             visual_inputs_hist.append(obs['vision'])
-        if controller.done_level(obs):
+        if controller.done_level(obs, seed, level):
             # finish the path integration level
             break
 

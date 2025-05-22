@@ -416,14 +416,13 @@ class Controller(BaseController):
             # Implementation of the bang bang control
             # If the heading error is greater than 5 degrees, hard coding of a left or right turn to face the home position
             # else advance straight ahead
-            if np.abs(err) > np.deg2rad(5):
+            if np.abs(err) > np.deg2rad(45):
                 if err > 0:
                     action = np.array([-1.0, 1.0])  # tourner à gauche
                 else:
                     action = np.array([1.0, -1.0])  # tourner à droite
             else:
-                turning_bias = np.tanh(err/(np.pi/2) * np.tanh(dist/10)) # > 0 -> tourner à gauche
-                print(f"Turning bias : {turning_bias}")
+                turning_bias = np.tanh(err/(np.pi/4)) # > 0 -> tourner à gauche
                 action = np.array(np.clip([1-turning_bias, 1+turning_bias], 0, 1))  # avance tout droit (valeur stable)
 
             # If the distance to the home position is less than 0.5 mm, stop the simulation
@@ -457,6 +456,11 @@ class Controller(BaseController):
             return {"joints": joints, "adhesion": adhesion}
 
         # --- Logique CPG (odor, vision, threat) ---
+        odor_action   = self.get_odor_bias(obs)
+        vision_action = self.get_vision_bias(obs)
+        threat_action = self.get_threat_response(obs)
+
+        odor_grad  = odor_action[0] - odor_action[1] # > 0 if must go right
 
         delta = np.linalg.norm(self.history[-1] - self.position)
         if delta < 0.05:
@@ -465,11 +469,12 @@ class Controller(BaseController):
             self.stuck_counter = 0
 
         if self.stuck_counter >= self.stuck_threshold:
+            print("Stuck : step back")
             self.stuck_counter = 0
-            self.recovery_steps = 1000
+            self.recovery_steps = 2000
 
         if getattr(self, "recovery_steps", 0) > 0:
-            action = np.array([-1.0, -1.0])  # recul plein gaz
+            action = np.array(np.clip([-1.0+odor_grad/2, -1.0-odor_grad/2], -1, 0))  # recul plein gaz
             self.recovery_steps -= 1
 
             joints, adhesion = step_cpg(
@@ -489,10 +494,6 @@ class Controller(BaseController):
             return {"joints": joints, "adhesion": adhesion}
             
         
-        odor_action   = self.get_odor_bias(obs)
-        vision_action = self.get_vision_bias(obs)
-        threat_action = self.get_threat_response(obs)
-        
         odor_power = np.clip(1-odor_action[0], 0, 1) # power of speed
         vision_power = np.clip(np.abs(vision_action[1]), 0, 1) # power of turning
 
@@ -508,12 +509,12 @@ class Controller(BaseController):
         action = np.array([speed-turning/2, speed+turning/2])
         action = np.clip(action, -1, 1)
 
-        vision_updated = obs.get("vision_updated", False)
-        if vision_updated:
-            print(f"Odor   : speed : {odor_action[0]}, turning : {odor_action[1]}")
-            print(f"Vision : speed : {vision_action[0]}, turning : {vision_action[1]}")
-            # print(f"Action : speed : {speed}, turning : {turning}")
-            # print(f"Action : left  : {action[0]}, right : {action[1]}")
+        # vision_updated = obs.get("vision_updated", False)
+        # if vision_updated:
+        #     print(f"Odor   : speed : {odor_action[0]}, turning : {odor_action[1]}")
+        #     print(f"Vision : speed : {vision_action[0]}, turning : {vision_action[1]}")
+        #     # print(f"Action : speed : {speed}, turning : {turning}")
+        #     # print(f"Action : left  : {action[0]}, right : {action[1]}")
 
         joint_angles, adhesion = step_cpg(
             cpg_network=self.cpg_network,
@@ -536,7 +537,7 @@ class Controller(BaseController):
             "adhesion": adhesion,
         }
 
-    def done_level(self, obs: Observation) -> bool:
+    def done_level(self, obs: Observation, seed=0, level=4) -> bool:
         # Lorsque la simulation se termine, enregistrer le graphique
         if self.quit:
             self.history.append(self.position.copy())
@@ -549,7 +550,7 @@ class Controller(BaseController):
 
             import os
             save_dir = os.getcwd()
-            save_path = os.path.join(save_dir, "trajectory.png")
+            save_path = os.path.join(save_dir, f"outputs/trajectory_seed{seed}_level{level}.png")
             self.fig.savefig(save_path, dpi=300)
             print(f"Graphique enregistré sous '{save_path}'.")
         return self.quit
