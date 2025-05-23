@@ -6,7 +6,7 @@ This project was presented by:
 - Teaching assistants : Thomas Ka Chung Lam, Dominic Dall'Osto, and Victor Alfred Stimpfling
 
 and completed by: 
-- Group 3 : Nico Dario Valsangiacomo, William Björn Schmid, and Julien Schluchter
+- Group 3 : Julien Schluchter, William Björn Schmid, and Nico Dario Valsangiacomo
 
 ## Setup
 To setup the required environment (`flygym`), please refer to the following Github repository : https://github.com/NeLy-EPFL/cobar-exercises. 
