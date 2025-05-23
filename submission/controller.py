@@ -39,8 +39,8 @@ class Controller(BaseController):
         # Initialisation of the plot
         plt.ion()
         self.fig, self.ax = plt.subplots()
-        (self.line_est,)  = self.ax.plot([], [], "-o", label="Estimation")
-        (self.line_real,) = self.ax.plot([], [], "-x", label="Real")
+        #(self.line_est,)  = self.ax.plot([], [], "-o", label="Estimation")
+        (self.line_real,) = self.ax.plot([], [], "-o", label="Real")
         self.real_history = []
         self.ax.legend(
             loc="upper left",
@@ -51,7 +51,7 @@ class Controller(BaseController):
         self.fig.tight_layout()
         self.ax.set_xlabel('X (mm)')
         self.ax.set_ylabel('Y (mm)')
-        self.ax.set_title('Real vs Estimated Fly Path')
+        self.ax.set_title('Real Fly Path')
         self.ax.grid(True)
         self.ax.set_aspect('equal', adjustable='box')
 
@@ -101,7 +101,7 @@ class Controller(BaseController):
         # Estimated position
         self.history.append(self.position.copy())
         data_est = np.asarray(self.history)
-        self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+        #self.line_est.set_data(data_est[:, 0], data_est[:, 1])
 
         # Real position
         real = obs.get("debug_fly")
