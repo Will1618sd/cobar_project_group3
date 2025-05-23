@@ -39,7 +39,7 @@ class Controller(BaseController):
         # Initialisation of the plot
         plt.ion()
         self.fig, self.ax = plt.subplots()
-        #(self.line_est,)  = self.ax.plot([], [], "-o", label="Estimation")
+        # (self.line_est,)  = self.ax.plot([], [], "-o", label="Estimation")
         (self.line_real,) = self.ax.plot([], [], "-o", label="Real")
         self.real_history = []
         self.ax.legend(
@@ -101,7 +101,7 @@ class Controller(BaseController):
         # Estimated position
         self.history.append(self.position.copy())
         data_est = np.asarray(self.history)
-        #self.line_est.set_data(data_est[:, 0], data_est[:, 1])
+        # self.line_est.set_data(data_est[:, 0], data_est[:, 1])
 
         # Real position
         real = obs.get("debug_fly")
@@ -554,7 +554,7 @@ class Controller(BaseController):
         self.step_count = 0
         self.history = [self.position.copy()]
         self.real_history = []  
-        self.line_est.set_data([], [])
+        # self.line_est.set_data([], [])
         self.line_real.set_data([], [])
         self.ax.relim()
         self.ax.autoscale_view()

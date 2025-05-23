@@ -8,7 +8,6 @@ from cobar_miniproject import levels
 from cobar_miniproject.cobar_fly import CobarFly
 from flygym import Camera, SingleFlySimulation
 from flygym.arena import FlatTerrain
-from flygym.vision.visualize import save_video_with_vision_insets
 
 
 def run_simulation(
@@ -22,15 +21,14 @@ def run_simulation(
 ):
     sys.path.append(str(submission_dir.parent))
     module = importlib.import_module(submission_dir.name)
-    timestep = 1e-4
     controller = module.controller.Controller()
+    timestep = 1e-4
 
     fly = CobarFly(
         debug=debug,
         enable_vision=True,
         render_raw_vision=True,
     )
-
 
     if level <= -1:
         level_arena = FlatTerrain()
@@ -58,8 +56,6 @@ def run_simulation(
         arena=level_arena,
     )
 
-    visual_inputs_hist = []
-
     # run cpg simulation
     obs, info = sim.reset()
     obs_hist = []
@@ -73,13 +69,11 @@ def run_simulation(
     for i in step_range:
         # Get observations
         obs, reward, terminated, truncated, info = sim.step(controller.get_actions(obs))
-        frame = sim.render()
-        if frame[0] is not None:
-            visual_inputs_hist.append(obs['vision'])
-        if controller.done_level(obs, seed, level):
+        sim.render()
+        if controller.done_level(obs):
             # finish the path integration level
             break
-
+            
         obs_ = obs.copy()
         if not obs_["vision_updated"]:
             if "vision" in obs_:
@@ -88,7 +82,6 @@ def run_simulation(
                 del obs_["raw_vision"]
         if "raw_vision" in info:
             del info["raw_vision"]
-
         obs_hist.append(obs_)
         info_hist.append(info)
 
@@ -102,14 +95,7 @@ def run_simulation(
     # Save video
     save_path = Path(output_dir) / f"level{level}_seed{seed}.mp4"
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    # cam.save_video(save_path, stabilization_time=0)
-    save_video_with_vision_insets(
-        sim,
-        cam,
-        save_path,
-        visual_inputs_hist,
-        stabilization_time=0
-    )
+    cam.save_video(save_path, stabilization_time=0)
 
 
 if __name__ == "__main__":
